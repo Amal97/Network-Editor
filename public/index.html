@@ -36,7 +36,7 @@
     <section class="view active" id="view-traffic">
       <div class="toolbar">
         <div class="toolbar-primary">
-          <input id="quickFilter" class="input grow" type="search" aria-label="Filter traffic" placeholder="Filter traffic" />
+          <input id="quickFilter" class="input grow" type="search" aria-label="Search traffic" placeholder="Search URL, headers, bodies, or $.json.path=value" />
           <select id="sourceFilter" class="input" aria-label="Traffic source">
             <option value="">All sources</option>
             <option value="browser">Browsers</option>
@@ -106,6 +106,7 @@
               <strong>Rules</strong>
               <button id="addRule" class="btn primary small">New rule</button>
             </div>
+            <select id="ruleProfile" class="input" aria-label="Active rule profile"></select>
             <input id="ruleSearch" class="input" type="search" placeholder="Search rules" />
             <div class="sidebar-tools">
               <label class="check small"><input type="checkbox" id="ruleSelectAll" /> Select all</label>

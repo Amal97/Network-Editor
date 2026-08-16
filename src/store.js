@@ -44,6 +44,16 @@ class FlowStore extends EventEmitter {
     return out.reverse();
   }
 
+  search(query, { limit = 5000 } = {}) {
+    const text = String(query || '').trim();
+    if (!text) return this.list({ limit });
+    const out = [];
+    for (let i = this.flows.length - 1; i >= 0 && out.length < limit; i--) {
+      if (flowMatches(this.flows[i], text)) out.push(summarize(this.flows[i]));
+    }
+    return out.reverse();
+  }
+
   clear() {
     this.flows = [];
     this.byId.clear();
@@ -111,22 +121,25 @@ function detectClientSource(headers) {
 function detail(flow) {
   return {
     ...summarize(flow),
-    request: {
-      method: flow.request.method,
-      url: flow.request.url,
-      httpVersion: flow.request.httpVersion,
-      headers: flow.request.headers,
-      ...encodeBody(flow.request.body, getHeader(flow.request.headers, 'content-type'), flow.request.truncated)
-    },
-    response: flow.response ? {
-      statusCode: flow.response.statusCode,
-      statusMessage: flow.response.statusMessage,
-      httpVersion: flow.response.httpVersion,
-      headers: flow.response.headers,
-      ...encodeBody(flow.response.body, getHeader(flow.response.headers, 'content-type'), flow.response.truncated)
-    } : null,
+    request: serializeMessage(flow.request),
+    response: flow.response ? serializeMessage(flow.response) : null,
+    originalRequest: flow.originalRequest ? serializeMessage(flow.originalRequest) : null,
+    originalResponse: flow.originalResponse ? serializeMessage(flow.originalResponse) : null,
+    webSocketFrames: flow.webSocketFrames || [],
     timing: flow.timing || {},
     errors: flow.errors || []
+  };
+}
+
+function serializeMessage(message) {
+  return {
+    method: message.method,
+    url: message.url,
+    statusCode: message.statusCode,
+    statusMessage: message.statusMessage,
+    httpVersion: message.httpVersion,
+    headers: message.headers,
+    ...encodeBody(message.body, getHeader(message.headers, 'content-type'), message.truncated)
   };
 }
 
@@ -148,6 +161,45 @@ function safe(fn, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function flowMatches(flow, query) {
+  const jsonQuery = /^(?:(request|response)\.)?(\$\.[\w.[\]-]+)(?:=(.*))?$/.exec(query);
+  if (jsonQuery) {
+    const sides = jsonQuery[1] ? [flow[jsonQuery[1]]] : [flow.request, flow.response];
+    return sides.some((side) => jsonPathMatches(side, jsonQuery[2], jsonQuery[3]));
+  }
+  const needle = query.toLowerCase();
+  const messages = [flow.request, flow.response].filter(Boolean);
+  const haystack = [
+    flow.request.url,
+    flow.request.method,
+    flow.response && flow.response.statusCode,
+    ...messages.flatMap((message) => message.headers.flatMap(([name, value]) => [name, value])),
+    ...messages.map((message) => bodyText(message))
+  ].join('\n').toLowerCase();
+  return haystack.includes(needle);
+}
+
+function jsonPathMatches(message, path, expected) {
+  if (!message || !message.body || message.truncated) return false;
+  let value;
+  try {
+    value = JSON.parse(message.body.toString('utf8'));
+  } catch {
+    return false;
+  }
+  const parts = path.slice(2).replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+  for (const part of parts) {
+    if (value === null || value === undefined || !Object.prototype.hasOwnProperty.call(Object(value), part)) return false;
+    value = value[part];
+  }
+  return expected === undefined || String(value).toLowerCase().includes(expected.toLowerCase());
+}
+
+function bodyText(message) {
+  if (!message.body || message.truncated || !isProbablyText(getHeader(message.headers, 'content-type'), message.body)) return '';
+  return message.body.toString('utf8');
 }
 
 module.exports = { FlowStore, summarize, detail };

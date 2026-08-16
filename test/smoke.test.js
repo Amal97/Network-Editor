@@ -4,12 +4,16 @@ const test = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
 const https = require('node:https');
+const http2 = require('node:http2');
 const net = require('node:net');
 const tls = require('node:tls');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const zlib = require('node:zlib');
+const WebSocket = require('ws');
+const { WebSocketServer } = WebSocket;
+const { HttpProxyAgent } = require('http-proxy-agent');
 
 const { NetworkModifier } = require('../src');
 const { isLikelyEmailTraffic } = require('../src/proxy');
@@ -192,6 +196,18 @@ test('adds, replaces and removes request headers', async () => {
   assert.equal(lastRequest.headers['x-drop-me'], undefined);
 });
 
+test('applies only active rule profiles in priority order', async () => {
+  app.ruleEngine.setActiveProfiles(['staging']);
+  setRules([
+    { name: 'low', profile: 'staging', priority: 1, enabled: true, match: {}, actions: [{ type: 'set-request-header', name: 'x-priority', value: 'low' }] },
+    { name: 'inactive', profile: 'default', priority: 100, enabled: true, match: {}, actions: [{ type: 'set-request-header', name: 'x-priority', value: 'inactive' }] },
+    { name: 'high', profile: 'staging', priority: 10, enabled: true, match: {}, actions: [{ type: 'set-request-header', name: 'x-priority', value: 'high' }] }
+  ]);
+  await proxyRequest(`${originUrl}/echo`);
+  assert.equal(lastRequest.headers['x-priority'], 'low');
+  app.ruleEngine.setActiveProfiles(['default']);
+});
+
 test('redirects a request to an arbitrary URL', async () => {
   setRules([{
     name: 'redirect',
@@ -215,6 +231,9 @@ test('replaces the request body with JSON', async () => {
   const payload = JSON.parse(response.body);
   assert.equal(payload.body, '{"replaced":true}');
   assert.match(payload.headers['content-type'], /application\/json/);
+  const flow = app.store.flows.at(-1);
+  assert.equal(flow.originalRequest.body.toString(), 'original');
+  assert.equal(flow.request.body.toString(), '{"replaced":true}');
 });
 
 test('replaces the response status, headers and body', async () => {
@@ -234,6 +253,9 @@ test('replaces the response status, headers and body', async () => {
   assert.equal(response.headers['x-injected'], 'yes');
   assert.equal(response.headers['x-origin'], undefined);
   assert.equal(response.body, 'replaced body');
+  const flow = app.store.flows.at(-1);
+  assert.equal(flow.originalResponse.body.toString(), 'original body');
+  assert.equal(flow.response.body.toString(), 'replaced body');
 });
 
 test('replaces the response body from base64 and a file', async () => {
@@ -372,9 +394,91 @@ test('intercepts HTTPS through CONNECT with a generated certificate', async () =
     actions: [{ type: 'set-response-header', name: 'x-mitm', value: 'ok' }]
   }]);
   const response = await proxyTlsRequest(`${secureOriginUrl}/plain`);
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 200, response.body);
   assert.equal(response.headers['x-mitm'], 'ok');
   assert.equal(response.body, 'original body');
+});
+
+test('captures and resends editable WebSocket frames', async (context) => {
+  const server = http.createServer();
+  const webSockets = new WebSocketServer({ server });
+  context.after(() => {
+    for (const socket of webSockets.clients) socket.terminate();
+    webSockets.close();
+    server.closeAllConnections();
+    server.close();
+  });
+  webSockets.on('connection', (socket) => socket.on('message', (data, binary) => socket.send(data, { binary })));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const target = `ws://127.0.0.1:${server.address().port}/echo`;
+  const client = new WebSocket(target, { agent: new HttpProxyAgent(`http://127.0.0.1:${app.config.settings.proxyPort}`) });
+  const messages = [];
+  client.on('message', (data) => messages.push(data.toString()));
+  await new Promise((resolve, reject) => {
+    client.once('open', resolve);
+    client.once('error', reject);
+  });
+  client.send('first-frame');
+  await new Promise((resolve) => client.once('message', resolve));
+  const targetHttp = target.replace(/^ws:/, 'http:');
+  const flow = app.store.flows.find((item) => item.resourceType === 'websocket' && item.request.url === targetHttp);
+  assert.ok(flow.webSocketFrames.some((frame) => frame.data === 'first-frame'));
+  const editedMessage = new Promise((resolve) => client.once('message', resolve));
+  const sent = await uiRequest(`/api/flows/${flow.id}/websocket-frame`, {
+    method: 'POST', body: { direction: 'server-to-client', data: 'edited-frame', binary: false }
+  });
+  assert.equal(sent.status, 200);
+  await editedMessage;
+  assert.ok(messages.includes('edited-frame'));
+  client.close();
+});
+
+test('routes matching requests through an upstream HTTP proxy', async (context) => {
+  let proxyHits = 0;
+  let proxyRequestUrl = '';
+  const upstreamProxy = http.createServer((req, res) => {
+    proxyHits++;
+    proxyRequestUrl = req.url;
+    res.writeHead(200, { 'content-type': 'text/plain', connection: 'close' });
+    res.end('through upstream proxy');
+  });
+  context.after(() => {
+    app.config.settings.upstreamProxyRoutes = [];
+    upstreamProxy.closeAllConnections();
+    upstreamProxy.close();
+  });
+  await new Promise((resolve) => upstreamProxy.listen(0, '127.0.0.1', resolve));
+  app.config.settings.upstreamProxyRoutes = [{ pattern: '127.0.0.1:*', url: `http://127.0.0.1:${upstreamProxy.address().port}` }];
+  const response = await proxyRequest(`${originUrl}/through-proxy`);
+  assert.equal(response.status, 200, response.body);
+  assert.equal(response.body, 'through upstream proxy');
+  assert.equal(proxyHits, 1);
+  assert.match(proxyRequestUrl, /^http:\/\/127\.0\.0\.1:/);
+});
+
+test('negotiates HTTP/2 with direct HTTPS origins', async (context) => {
+  const leaf = app.ca.leafFor('localhost');
+  const h2Origin = http2.createSecureServer({ key: leaf.key, cert: leaf.cert, allowHTTP1: true });
+  const sessions = new Set();
+  h2Origin.on('session', (session) => {
+    sessions.add(session);
+    session.once('close', () => sessions.delete(session));
+  });
+  context.after(() => {
+    for (const session of sessions) session.destroy();
+    h2Origin.close();
+  });
+  h2Origin.on('stream', (stream) => {
+    stream.respond({ ':status': 200, 'content-type': 'text/plain' });
+    stream.end('h2 body');
+  });
+  await new Promise((resolve) => h2Origin.listen(0, '127.0.0.1', resolve));
+  const target = `https://localhost:${h2Origin.address().port}/h2`;
+  const response = await proxyTlsRequest(target);
+  assert.equal(response.status, 200, response.body);
+  assert.equal(response.body, 'h2 body');
+  const flow = app.store.flows.find((item) => item.request.url === target);
+  assert.equal(flow.response.httpVersion, '2.0');
 });
 
 test('pauses at a breakpoint and applies manual edits', async () => {
@@ -428,6 +532,21 @@ test('exposes flows, rules and settings over the local API', async () => {
   assert.equal(created.status, 201);
   const removed = await uiRequest(`/api/rules/${created.body.rule.id}`, { method: 'DELETE' });
   assert.equal(removed.status, 200);
+});
+
+test('searches captured headers, bodies and JSON paths', async () => {
+  setRules([]);
+  await proxyRequest(`${originUrl}/echo`, {
+    method: 'POST',
+    headers: { 'x-search-token': 'header-needle' },
+    body: '{"user":{"id":"json-needle"}}'
+  });
+  const header = await uiRequest('/api/flows?q=header-needle');
+  const body = await uiRequest('/api/flows?q=json-needle');
+  const jsonPath = await uiRequest('/api/flows?q=request.%24.user.id%3Djson-needle');
+  assert.ok(header.body.flows.some((flow) => flow.url.endsWith('/echo')));
+  assert.ok(body.body.flows.some((flow) => flow.url.endsWith('/echo')));
+  assert.ok(jsonPath.body.flows.some((flow) => flow.url.endsWith('/echo')));
 });
 
 test('supports bulk operations on flows and rules', async () => {

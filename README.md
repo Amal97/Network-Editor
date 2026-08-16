@@ -79,10 +79,12 @@ Chrome/Edge/Brave in a throwaway profile already pointed at the proxy, or flips 
 * Full HTTP and HTTPS (MITM) capture with an auto-generated, locally stored root CA.
 * Mail ports and common email/authentication hosts bypass HTTPS interception by default, avoiding certificate-pinning and non-HTTP TLS failures.
 * Per-host leaf certificates generated on demand and cached.
-* WebSocket connections are tunnelled and logged.
+* WebSocket messages are captured by direction, inspectable, editable and resendable while connected.
+* Direct HTTPS requests negotiate HTTP/2 upstream with automatic HTTP/1.1 fallback.
 * gzip / deflate / brotli / zstd responses are decoded so you can read and edit them.
 * Live request list with method, status, URL, resource type, size and duration.
 * Inspect request/response headers and bodies, with JSON pretty-printing and image previews.
+* Compare original and modified requests/responses side by side, and inspect a phase waterfall for each exchange.
 * Export everything as **HAR**, or copy any request as a **cURL** command.
 
 ### Filter
@@ -90,6 +92,7 @@ Chrome/Edge/Brave in a throwaway profile already pointed at the proxy, or flips 
   resource type (`document`, `stylesheet`, `script`, `image`, `font`, `xhr`, `media`,
   `websocket`, `other`). Anything filtered out is proxied untouched.
 * Client-side quick filter for the visible list, plus status-class and "modified only" filters.
+* Full-content search across URLs, headers and text bodies, including JSON-path queries such as `request.$.user.id=42`.
 
 ### Modify — rules
 A rule is edited as a form: **Label**, **Request filter**, **Action**, then two stages.
@@ -115,7 +118,8 @@ Under the hood every rule is still a list of actions, available in *Advanced* mo
 Values support capture placeholders `$1…$9` (from wildcard/regex matches) and
 `{{url}}`, `{{host}}`, `{{path}}`, `{{query}}`, `{{pathAndQuery}}`, `{{method}}`.
 
-Rules can be selected in bulk to enable, disable, duplicate or delete them, and are stored in
+Rules can be organized into switchable profiles and folders, assigned priorities, and reordered
+by dragging. They can also be selected in bulk to enable, disable, duplicate or delete them, and are stored in
 `~/.network-modifier/config.json` — exportable/importable as JSON.
 
 ### Modify — breakpoints
@@ -158,6 +162,11 @@ console.log(...)    printed by the netmod process
 ### Replay
 Resend any captured request as-is, or open **Edit & replay** to change the method, URL,
 headers and body first — optionally re-applying your rules.
+
+### Upstream routing
+Settings can route traffic through HTTP, HTTPS or SOCKS upstream proxies. Proxy URLs support
+URL-encoded credentials, and wildcard host routes can override the default proxy. Direct HTTPS
+traffic negotiates HTTP/2 automatically; proxy-routed traffic uses the appropriate tunnel agent.
 
 ---
 

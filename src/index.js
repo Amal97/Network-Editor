@@ -22,6 +22,7 @@ class NetworkModifier {
     });
     this.ruleEngine = new RuleEngine({ scriptEngine: this.scriptEngine });
     this.ruleEngine.setRules(this.config.rules);
+    this.ruleEngine.setActiveProfiles(this.config.settings.activeRuleProfiles);
     this.breakpoints = new BreakpointManager();
 
     this.proxy = new ProxyServer({

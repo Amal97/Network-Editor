@@ -118,7 +118,8 @@ class ApiServer {
 
     if (route === '/api/flows' && method === 'GET') {
       const since = Number(url.searchParams.get('since') || 0);
-      return sendJson(res, 200, { flows: this.store.list({ since }) });
+      const query = url.searchParams.get('q');
+      return sendJson(res, 200, { flows: query === null ? this.store.list({ since }) : this.store.search(query) });
     }
     if (route === '/api/flows' && method === 'DELETE') {
       this.store.clear();
@@ -154,6 +155,11 @@ class ApiServer {
         const body = await readJson(req);
         const replayed = await this.proxy.replay(flow, body.overrides || {}, { applyRules: !!body.applyRules });
         return sendJson(res, 200, detail(replayed));
+      }
+      if (action === 'websocket-frame' && method === 'POST') {
+        const body = await readJson(req);
+        const ok = this.proxy.sendWebSocketFrame(flow.id, body);
+        return sendJson(res, ok ? 200 : 409, { ok, error: ok ? null : 'WebSocket is not connected' });
       }
       if (action === 'body' && method === 'GET') {
         const which = url.searchParams.get('side') === 'request' ? 'request' : 'response';
@@ -265,6 +271,7 @@ class ApiServer {
       const body = await readJson(req);
       const settings = this.config.updateSettings(body.settings || body);
       this.store.setMax(settings.maxFlows);
+      this.ruleEngine.setActiveProfiles(settings.activeRuleProfiles);
       this.push('settings', settings);
       return sendJson(res, 200, { settings });
     }

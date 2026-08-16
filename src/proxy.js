@@ -6,6 +6,12 @@ const net = require('net');
 const tls = require('tls');
 const zlib = require('zlib');
 const { EventEmitter } = require('events');
+const http2wrapper = require('http2-wrapper');
+const WebSocket = require('ws');
+const { WebSocketServer } = WebSocket;
+const { HttpProxyAgent } = require('http-proxy-agent');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 
 const {
   collectBody, detectResourceType, rawToPairs, getHeader, setHeader, removeHeader,
@@ -55,6 +61,9 @@ class ProxyServer extends EventEmitter {
     this.tunnels = 0;
     // http.Server stops tracking sockets once CONNECT/upgrade detaches them.
     this.detachedSockets = new Set();
+    this.webSocketServer = new WebSocketServer({ noServer: true });
+    this.webSockets = new Map();
+    this.proxyAgents = new Map();
   }
 
   track(socket) {
@@ -82,6 +91,11 @@ class ProxyServer extends EventEmitter {
       this.server.close(() => resolve());
       this.server.closeAllConnections?.();
       for (const socket of this.detachedSockets) socket.destroy();
+      for (const pair of this.webSockets.values()) {
+        pair.client.terminate();
+        pair.upstream.terminate();
+      }
+      this.webSockets.clear();
       this.detachedSockets.clear();
       httpAgent.destroy();
       httpsAgent.destroy();
@@ -165,40 +179,72 @@ class ProxyServer extends EventEmitter {
 
   onUpgrade(req, socket, head, scheme) {
     const target = this.absoluteUrl(req, scheme);
-    const parsed = new URL(target);
-    const isTls = parsed.protocol === 'https:';
-    const options = {
-      host: parsed.hostname,
-      port: parsed.port || (isTls ? 443 : 80),
-      rejectUnauthorized: this.settings.rejectUnauthorized
-    };
-    const upstream = isTls ? tls.connect(options) : net.connect(options.port, options.host);
-    this.track(upstream);
-    this.track(socket);
     const flow = this.createFlow(req, target, scheme, 'websocket');
     flow.state = 'websocket';
+    flow.webSocketFrames = [];
     if (this.shouldCapture(flow)) this.store.add(flow);
-
-    upstream.on('connect', () => {
-      upstream.write(rebuildUpgradeRequest(req, parsed));
-      if (head && head.length) upstream.write(head);
-      upstream.pipe(socket);
-      socket.pipe(upstream);
+    const wsUrl = target.replace(/^http/i, 'ws');
+    const headers = Object.fromEntries(req.headers ? Object.entries(req.headers).filter(([name]) =>
+      !['connection', 'upgrade', 'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions', 'host'].includes(name.toLowerCase())) : []);
+    const proxyUrl = this.resolveUpstreamProxy(new URL(target));
+    const upstream = new WebSocket(wsUrl, req.headers['sec-websocket-protocol'] || undefined, {
+      headers,
+      rejectUnauthorized: this.settings.rejectUnauthorized,
+      agent: proxyUrl ? this.proxyAgent(proxyUrl, target.startsWith('https:')) : undefined
     });
-    upstream.on('secureConnect', () => {});
-    upstream.on('error', (err) => {
+
+    upstream.once('open', () => {
+      this.webSocketServer.handleUpgrade(req, socket, head, (client) => {
+        this.webSockets.set(flow.id, { client, upstream });
+        const relay = (source, destination, direction) => source.on('message', (data, isBinary) => {
+          this.recordWebSocketFrame(flow, direction, data, isBinary);
+          if (destination.readyState === WebSocket.OPEN) destination.send(data, { binary: isBinary });
+        });
+        relay(client, upstream, 'client-to-server');
+        relay(upstream, client, 'server-to-client');
+        const close = () => {
+          client.terminate();
+          upstream.terminate();
+          this.webSockets.delete(flow.id);
+          flow.endTime = Date.now();
+          flow.state = flow.error ? 'error' : 'completed';
+          this.store.touch(flow);
+        };
+        client.once('close', close);
+        upstream.once('close', close);
+        client.on('error', (err) => { flow.error = err.message; });
+        upstream.on('error', (err) => { flow.error = err.message; });
+      });
+    });
+    upstream.once('error', (err) => {
       flow.error = err.message;
       flow.state = 'error';
-      this.store.touch(flow);
+      flow.endTime = Date.now();
+      if (this.store.get(flow.id)) this.store.touch(flow);
       socket.destroy();
     });
-    socket.on('error', () => upstream.destroy());
-    socket.on('close', () => {
-      upstream.destroy();
-      flow.endTime = Date.now();
-      if (flow.state === 'websocket') flow.state = 'completed';
-      this.store.touch(flow);
+  }
+
+  recordWebSocketFrame(flow, direction, data, isBinary) {
+    const buffer = Buffer.from(data);
+    flow.webSocketFrames.push({
+      id: nextId('ws'), direction, time: Date.now(), binary: isBinary,
+      data: isBinary ? buffer.toString('base64') : buffer.toString('utf8'), size: buffer.length
     });
+    if (flow.webSocketFrames.length > 1000) flow.webSocketFrames.shift();
+    this.store.touch(flow);
+  }
+
+  sendWebSocketFrame(flowId, { direction, data, binary }) {
+    const pair = this.webSockets.get(flowId);
+    if (!pair) return false;
+    const destination = direction === 'server-to-client' ? pair.client : pair.upstream;
+    if (destination.readyState !== WebSocket.OPEN) return false;
+    const payload = binary ? Buffer.from(String(data || ''), 'base64') : String(data || '');
+    destination.send(payload, { binary: !!binary });
+    const flow = this.store.get(flowId);
+    if (flow) this.recordWebSocketFrame(flow, `${direction}-edited`, payload, !!binary);
+    return true;
   }
 
   /* ------------------------------------------------------------------ Request */
@@ -288,6 +334,7 @@ class ProxyServer extends EventEmitter {
       flow.request.stream = collected.stream;
       flow.request.size = collected.size;
       flow.timing.requestReceived = Date.now();
+      flow.originalRequest = snapshotMessage(flow.request);
 
       let directives = { cancel: false, breakpoint: false, delayMs: 0, mock: null, throttle: 0, applied: [], errors: [] };
       if (captured) {
@@ -377,30 +424,55 @@ class ProxyServer extends EventEmitter {
       if (HOP_BY_HOP.has(name.toLowerCase())) continue;
       headers.push(name, value);
     }
+    const proxyUrl = this.resolveUpstreamProxy(target);
+    const parsedProxy = proxyUrl ? new URL(proxyUrl) : null;
+    const directHttpProxy = parsedProxy && !isTls && /^https?:$/.test(parsedProxy.protocol);
+    if (directHttpProxy && (parsedProxy.username || parsedProxy.password)) {
+      const credentials = `${decodeURIComponent(parsedProxy.username)}:${decodeURIComponent(parsedProxy.password)}`;
+      headers.push('proxy-authorization', `Basic ${Buffer.from(credentials).toString('base64')}`);
+    }
     return {
       isTls,
+      useHttp2: isTls && !proxyUrl && this.settings.enableHttp2Upstream,
       options: {
-        protocol: target.protocol,
-        host: target.hostname,
-        port: target.port || (isTls ? 443 : 80),
+        protocol: directHttpProxy ? parsedProxy.protocol : target.protocol,
+        host: directHttpProxy ? parsedProxy.hostname : target.hostname,
+        port: directHttpProxy ? (parsedProxy.port || (parsedProxy.protocol === 'https:' ? 443 : 80)) : (target.port || (isTls ? 443 : 80)),
         method: flow.request.method,
-        path: target.pathname + target.search,
-        headers,
+        path: directHttpProxy ? target.toString() : target.pathname + target.search,
+        headers: proxyUrl && !directHttpProxy ? pairsToHeaderObject(headers) : headers,
         setHost: false,
-        agent: isTls ? httpsAgent : httpAgent,
+        agent: proxyUrl && !directHttpProxy ? this.proxyAgent(proxyUrl, isTls) : (directHttpProxy && parsedProxy.protocol === 'https:' ? httpsAgent : (isTls ? httpsAgent : httpAgent)),
         rejectUnauthorized: this.settings.rejectUnauthorized,
         servername: target.hostname
       }
     };
   }
 
-  forward(flow, res, captured, throttle) {
+  resolveUpstreamProxy(target) {
+    for (const route of this.settings.upstreamProxyRoutes || []) {
+      if (route && route.pattern && route.url && wildcardToRegExp(route.pattern, 'i').test(target.host)) return route.url;
+    }
+    return this.settings.upstreamProxy || '';
+  }
+
+  proxyAgent(proxyUrl, isTls) {
+    const key = `${isTls}:${proxyUrl}`;
+    if (this.proxyAgents.has(key)) return this.proxyAgents.get(key);
+    const protocol = new URL(proxyUrl).protocol;
+    const agent = protocol.startsWith('socks')
+      ? new SocksProxyAgent(proxyUrl)
+      : isTls ? new HttpsProxyAgent(proxyUrl) : new HttpProxyAgent(proxyUrl);
+    this.proxyAgents.set(key, agent);
+    return agent;
+  }
+
+  async forward(flow, res, captured, throttle) {
     return new Promise((resolve) => {
-      const { isTls, options } = this.buildUpstreamOptions(flow);
+      const { isTls, useHttp2, options } = this.buildUpstreamOptions(flow);
       const transport = isTls ? https : http;
       flow.timing.upstreamStart = Date.now();
-
-      const upstreamReq = transport.request(options, async (upstreamRes) => {
+      const onResponse = async (upstreamRes) => {
         flow.timing.firstByte = Date.now();
         try {
           await this.handleUpstreamResponse(flow, upstreamRes, res, captured, throttle);
@@ -408,24 +480,34 @@ class ProxyServer extends EventEmitter {
           this.fail(flow, res, err, captured);
         }
         resolve();
-      });
-
-      upstreamReq.on('error', (err) => {
+      };
+      const requestOptions = useHttp2
+        ? {
+            ...options,
+            headers: pairsToHeaderObject(options.headers),
+            agent: { http: httpAgent, https: httpsAgent, http2: http2wrapper.globalAgent }
+          }
+        : options;
+      const start = useHttp2 ? http2wrapper.auto(requestOptions, onResponse) : Promise.resolve(transport.request(requestOptions, onResponse));
+      start.then((upstreamReq) => {
+        upstreamReq.on('error', (err) => {
+          this.fail(flow, res, err, captured);
+          resolve();
+        });
+        if (flow.request.truncated && flow.request.stream) flow.request.stream.pipe(upstreamReq);
+        else {
+          if (flow.request.body && flow.request.body.length) upstreamReq.write(flow.request.body);
+          upstreamReq.end();
+        }
+      }).catch((err) => {
         this.fail(flow, res, err, captured);
         resolve();
       });
-
-      if (flow.request.truncated && flow.request.stream) {
-        flow.request.stream.pipe(upstreamReq);
-      } else {
-        if (flow.request.body && flow.request.body.length) upstreamReq.write(flow.request.body);
-        upstreamReq.end();
-      }
     });
   }
 
   async handleUpstreamResponse(flow, upstreamRes, res, captured, throttle) {
-    const headers = rawToPairs(upstreamRes.rawHeaders);
+    const headers = rawToPairs(upstreamRes.rawHeaders).filter(([name]) => !name.startsWith(':'));
     flow.response = {
       statusCode: upstreamRes.statusCode,
       statusMessage: upstreamRes.statusMessage,
@@ -454,6 +536,7 @@ class ProxyServer extends EventEmitter {
     flow.response.stream = collected.stream;
     flow.response.size = collected.size;
     flow.timing.responseReceived = Date.now();
+    flow.originalResponse = snapshotMessage(flow.response);
 
     let directives = { cancel: false, breakpoint: false, delayMs: 0, throttle: 0, applied: [], errors: [] };
     if (captured && !flow.response.truncated) {
@@ -643,6 +726,26 @@ function rebuildUpgradeRequest(req, parsed) {
     lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
   }
   return lines.join('\r\n') + '\r\n\r\n';
+}
+
+function snapshotMessage(message) {
+  return {
+    ...message,
+    headers: message.headers.map(([name, value]) => [name, value]),
+    body: message.body ? Buffer.from(message.body) : message.body,
+    stream: null
+  };
+}
+
+function pairsToHeaderObject(flatHeaders) {
+  const headers = {};
+  for (let index = 0; index < flatHeaders.length; index += 2) {
+    const name = flatHeaders[index];
+    const value = flatHeaders[index + 1];
+    if (headers[name] === undefined) headers[name] = value;
+    else headers[name] = [].concat(headers[name], value);
+  }
+  return headers;
 }
 
 function sleep(ms) {

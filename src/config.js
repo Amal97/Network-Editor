@@ -15,10 +15,14 @@ const DEFAULT_SETTINGS = {
   maxFlows: 2000,
   maxBodySize: 10 * 1024 * 1024,
   decodeContentEncoding: true,
+  enableHttp2Upstream: true,
   rejectUnauthorized: false,
   breakpointsEnabled: true,
   breakpoints: { onRequest: false, onResponse: false, urlPattern: '' },
   captureFilter: { urlPattern: '', matchType: 'contains', methods: [], resourceTypes: [], negate: false },
+  activeRuleProfiles: ['default'],
+  upstreamProxy: '',
+  upstreamProxyRoutes: [],
   bypassHosts: []
 };
 

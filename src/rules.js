@@ -47,6 +47,9 @@ function makeRule(partial = {}) {
     id: partial.id || nextId('r'),
     name: partial.name || 'New rule',
     enabled: partial.enabled !== false,
+    profile: partial.profile || 'default',
+    folder: partial.folder || '',
+    priority: Number.isFinite(Number(partial.priority)) ? Number(partial.priority) : 0,
     match: {
       urlPattern: '',
       matchType: 'contains',
@@ -242,12 +245,17 @@ function applyBodyToResponse(flow, body) {
 class RuleEngine {
   constructor({ scriptEngine, onScriptLog }) {
     this.rules = [];
+    this.activeProfiles = new Set(['default']);
     this.scriptEngine = scriptEngine;
     this.onScriptLog = onScriptLog || (() => {});
   }
 
   setRules(rules) {
-    this.rules = rules.map(makeRule);
+    this.rules = rules.map(makeRule).sort((left, right) => right.priority - left.priority);
+  }
+
+  setActiveProfiles(profiles) {
+    this.activeProfiles = new Set(Array.isArray(profiles) && profiles.length ? profiles : ['default']);
   }
 
   apply(flow, phase) {
@@ -257,7 +265,7 @@ class RuleEngine {
     };
 
     for (const rule of this.rules) {
-      if (!rule.enabled) continue;
+      if (!rule.enabled || !this.activeProfiles.has(rule.profile || 'default')) continue;
       let captures;
       try {
         captures = matchRule(rule, flow, phase);

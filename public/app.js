@@ -103,6 +103,9 @@ const state = {
   dirty: false,
   detailTab: 'overview',
   pending: [],
+  searchIds: null,
+  searchTimer: null,
+  searchVersion: 0,
   lastSeq: 0,
   version: ''
 };
@@ -268,7 +271,7 @@ function wireChrome() {
     breakpoints: { ...state.settings.breakpoints, onResponse: !state.settings.breakpoints.onResponse }
   }));
   el('clearFlows').addEventListener('click', () => api('/api/flows', { method: 'DELETE' }));
-  el('quickFilter').addEventListener('input', applyFilter);
+  el('quickFilter').addEventListener('input', scheduleFlowSearch);
   el('sourceFilter').addEventListener('change', applySourceFilter);
   el('typeFilter').addEventListener('change', applyFilter);
   el('statusFilter').addEventListener('change', applyFilter);
@@ -292,6 +295,7 @@ function wireChrome() {
   el('exportRules').addEventListener('click', exportRules);
   el('importRules').addEventListener('click', importRules);
   el('ruleSearch').addEventListener('input', renderRuleList);
+  el('ruleProfile').addEventListener('change', (event) => patchSettings({ activeRuleProfiles: [event.target.value] }));
   el('ruleSelectAll').addEventListener('change', (event) => {
     state.pickedRules = event.target.checked ? new Set(visibleRules().map((r) => r.id)) : new Set();
     renderRuleList();
@@ -468,11 +472,31 @@ function matchesFilter(flow) {
   if (status === 'err' && !(flow.state === 'error' || flow.state === 'cancelled')) return false;
   if (status === 'mod' && !(flow.modified && (flow.modified.request || flow.modified.response))) return false;
   if (/^[2345]$/.test(status) && String(flow.status || '')[0] !== status) return false;
-  if (text) {
-    const haystack = `${flow.method} ${flow.url} ${flow.status || ''} ${flow.resourceType} ${flow.contentType || ''} ${flow.clientSource || ''}`.toLowerCase();
-    if (!haystack.includes(text)) return false;
-  }
+  if (text && state.searchIds && !state.searchIds.has(flow.id)) return false;
   return true;
+}
+
+function scheduleFlowSearch() {
+  clearTimeout(state.searchTimer);
+  const query = el('quickFilter').value.trim();
+  if (!query) {
+    state.searchIds = null;
+    state.searchVersion++;
+    return applyFilter();
+  }
+  state.searchTimer = setTimeout(() => runFlowSearch(query), 180);
+}
+
+async function runFlowSearch(query) {
+  const version = ++state.searchVersion;
+  try {
+    const data = await api(`/api/flows?q=${encodeURIComponent(query)}`);
+    if (version !== state.searchVersion || query !== el('quickFilter').value.trim()) return;
+    state.searchIds = new Set(data.flows.map((flow) => flow.id));
+    applyFilter();
+  } catch (err) {
+    toast(err.message, true);
+  }
 }
 
 async function applySourceFilter() {
@@ -562,6 +586,8 @@ function renderDetail(flow) {
     ['req-body', 'Request body'],
     ['res-headers', flow.response ? `Response headers (${flow.response.headers.length})` : 'Response headers'],
     ['res-body', 'Response body'],
+    ...(flow.resourceType === 'websocket' ? [['ws-frames', `Frames (${(flow.webSocketFrames || []).length})`]] : []),
+    ['diff', 'Diff'],
     ['timing', 'Timing']
   ];
   const bar = h('div', { class: 'subtabs' });
@@ -591,7 +617,14 @@ function renderDetail(flow) {
     case 'res-body':
       body.appendChild(flow.response ? bodyView(flow.response, flow.id, 'response') : h('p', { class: 'muted' }, 'No response yet.'));
       break;
+    case 'ws-frames':
+      body.appendChild(webSocketFramesView(flow));
+      break;
+    case 'diff':
+      body.appendChild(diffView(flow));
+      break;
     case 'timing':
+      body.appendChild(timingWaterfall(flow));
       body.appendChild(kvTable({
         Started: new Date(flow.startTime).toLocaleTimeString(),
         Duration: formatMs(flow.duration),
@@ -617,6 +650,89 @@ function renderDetail(flow) {
         Errors: (flow.errors || []).join('; ')
       }));
   }
+}
+
+function webSocketFramesView(flow) {
+  const frames = flow.webSocketFrames || [];
+  if (!frames.length) return h('p', { class: 'muted' }, 'No WebSocket messages captured yet.');
+  const wrap = h('div', { class: 'ws-frames' });
+  for (const frame of frames) {
+    const area = h('textarea', { class: 'input', spellcheck: 'false' }, frame.data);
+    wrap.appendChild(h('section', { class: 'ws-frame' },
+      h('header', {},
+        h('strong', {}, frame.direction),
+        h('span', { class: 'muted small' }, `${new Date(frame.time).toLocaleTimeString()} · ${formatBytes(frame.size)}${frame.binary ? ' · base64' : ''}`),
+        h('button', {
+          class: 'btn small ghost',
+          onclick: async () => {
+            await api(`/api/flows/${flow.id}/websocket-frame`, {
+              method: 'POST', body: { direction: frame.direction.startsWith('server-to-client') ? 'server-to-client' : 'client-to-server', data: area.value, binary: frame.binary }
+            });
+            toast('Edited frame sent');
+          }
+        }, 'Send edited')),
+      area));
+  }
+  return wrap;
+}
+
+function diffView(flow) {
+  const wrap = h('div', { class: 'diff-view' });
+  const sections = [
+    ['Request', flow.originalRequest, flow.request],
+    ['Response', flow.originalResponse, flow.response]
+  ];
+  let changed = false;
+  for (const [label, before, after] of sections) {
+    if (!before || !after || sameMessage(before, after)) continue;
+    changed = true;
+    wrap.appendChild(h('h3', { class: 'section-title' }, label));
+    wrap.appendChild(h('div', { class: 'diff-grid' },
+      diffColumn('Original', before, 'before'),
+      diffColumn('Modified', after, 'after')));
+  }
+  return changed ? wrap : h('p', { class: 'muted' }, 'No request or response changes were recorded.');
+}
+
+function sameMessage(left, right) {
+  return messageText(left) === messageText(right);
+}
+
+function diffColumn(label, message, kind) {
+  return h('section', { class: `diff-column ${kind}` },
+    h('strong', {}, label),
+    h('pre', { class: 'code' }, messageText(message)));
+}
+
+function messageText(message) {
+  const start = message.method
+    ? `${message.method} ${message.url}`
+    : `${message.statusCode || ''} ${message.statusMessage || ''}`.trim();
+  return [start, ...message.headers.map(([name, value]) => `${name}: ${value}`), '', message.bodyEncoding === 'text' ? message.body : `[${message.bodyEncoding || 'binary'} body]`].join('\n');
+}
+
+function timingWaterfall(flow) {
+  const timing = flow.timing || {};
+  const end = timing.end || flow.endTime || Date.now();
+  const total = Math.max(1, end - flow.startTime);
+  const phases = [
+    ['Receive request', flow.startTime, timing.requestReceived],
+    ['Rules / queue', timing.requestReceived, timing.upstreamStart],
+    ['Server wait', timing.upstreamStart, timing.firstByte],
+    ['Download', timing.firstByte, timing.responseReceived],
+    ['Response rules / send', timing.responseReceived, end]
+  ].filter(([, start, finish]) => start && finish && finish >= start);
+  const chart = h('div', { class: 'waterfall' });
+  for (const [label, start, finish] of phases) {
+    chart.appendChild(h('div', { class: 'waterfall-row' },
+      h('span', {}, label),
+      h('div', { class: 'waterfall-track' }, h('i', {
+        style: `left:${((start - flow.startTime) / total) * 100}%;width:${Math.max(1, ((finish - start) / total) * 100)}%`,
+        title: `${label}: ${formatMs(finish - start)}`
+      })),
+      h('em', {}, formatMs(finish - start))));
+  }
+  return chart;
 }
 
 function relative(time, start) {
@@ -961,9 +1077,11 @@ function describeSystemProxy(proxy) {
 
 function visibleRules() {
   const query = (el('ruleSearch').value || '').trim().toLowerCase();
-  if (!query) return state.rules;
+  const profile = el('ruleProfile').value || (state.settings.activeRuleProfiles || ['default'])[0];
   return state.rules.filter((rule) => {
-    const haystack = `${rule.name} ${rule.match.urlPattern} ${rule.actions.map((a) => a.type).join(' ')}`;
+    if ((rule.profile || 'default') !== profile) return false;
+    if (!query) return true;
+    const haystack = `${rule.name} ${rule.folder || ''} ${rule.match.urlPattern} ${rule.actions.map((a) => a.type).join(' ')}`;
     return haystack.toLowerCase().includes(query);
   });
 }
@@ -975,6 +1093,12 @@ function renderRules() {
 
 function renderRuleList() {
   el('rulesCount').textContent = state.rules.filter((r) => r.enabled).length;
+  const profileSelect = el('ruleProfile');
+  const selectedProfile = (state.settings.activeRuleProfiles || ['default'])[0];
+  const profiles = [...new Set(['default', ...state.rules.map((rule) => rule.profile || 'default')])].sort();
+  profileSelect.innerHTML = '';
+  for (const profile of profiles) profileSelect.appendChild(h('option', { value: profile }, profile));
+  profileSelect.value = profiles.includes(selectedProfile) ? selectedProfile : 'default';
   const list = el('ruleList');
   const rules = visibleRules();
   list.innerHTML = '';
@@ -984,13 +1108,27 @@ function renderRuleList() {
       h('p', { class: 'muted' }, state.rules.length ? 'No rules match your search.' : 'No rules yet.')));
   }
 
+  let currentFolder = null;
   for (const rule of rules) {
+    const folder = rule.folder || 'Ungrouped';
+    if (folder !== currentFolder) {
+      currentFolder = folder;
+      list.appendChild(h('div', { class: 'rule-folder' }, folder));
+    }
     const summary = describeRule(rule);
-    list.appendChild(h('div', {
+    const item = h('div', {
       class: `rule-item${rule.id === state.selectedRuleId ? ' selected' : ''}${rule.enabled ? '' : ' disabled'}`,
+      draggable: 'true',
+      'data-rule-id': rule.id,
       onclick: (event) => {
         if (event.target.closest('input')) return;
         selectRule(rule.id);
+      },
+      ondragstart: (event) => event.dataTransfer.setData('text/plain', rule.id),
+      ondragover: (event) => event.preventDefault(),
+      ondrop: (event) => {
+        event.preventDefault();
+        reorderRule(event.dataTransfer.getData('text/plain'), rule.id);
       }
     },
       h('input', {
@@ -1012,11 +1150,29 @@ function renderRuleList() {
         h('span')),
       h('div', { class: 'rule-body' },
         h('div', { class: 'rule-name', title: rule.name }, rule.name),
-        h('div', { class: 'rule-meta', title: summary }, summary))
-    ));
+        h('div', { class: 'rule-meta', title: summary }, `P${rule.priority || 0} · ${summary}`))
+    );
+    list.appendChild(item);
   }
 
   renderRuleBulk();
+}
+
+async function reorderRule(sourceId, targetId) {
+  if (!sourceId || sourceId === targetId) return;
+  const ordered = [...state.rules];
+  const sourceIndex = ordered.findIndex((rule) => rule.id === sourceId);
+  const targetIndex = ordered.findIndex((rule) => rule.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+  const [moved] = ordered.splice(sourceIndex, 1);
+  ordered.splice(targetIndex, 0, moved);
+  const total = ordered.length;
+  ordered.forEach((rule, index) => { rule.priority = total - index; });
+  try {
+    await api('/api/rules', { method: 'PUT', body: { rules: ordered } });
+  } catch (err) {
+    toast(err.message, true);
+  }
 }
 
 function syncEditor() {
@@ -1132,6 +1288,10 @@ function renderRuleEditor() {
     checked: draft.enabled,
     onchange: () => { draft.enabled = enabled.checked; markDirty(); }
   });
+  const profile = h('input', { class: 'input', value: draft.profile || 'default', placeholder: 'default' });
+  const folder = h('input', { class: 'input', value: draft.folder || '', placeholder: 'Optional folder' });
+  const priority = h('input', { class: 'input', type: 'number', value: draft.priority || 0 });
+  for (const input of [profile, folder, priority]) input.addEventListener('input', markDirty);
 
   const actionSelect = h('select', { class: 'input', style: 'max-width:320px' },
     ...RULE_ACTIONS.map(([value, label]) => h('option', { value }, label)));
@@ -1249,6 +1409,12 @@ function renderRuleEditor() {
       h('label', {}, 'Label'),
       h('div', {}, name)),
     h('div', { class: 'form-row' },
+      h('label', {}, 'Organization'),
+      h('div', { class: 'grid2' },
+        h('div', { class: 'field' }, h('label', {}, 'Profile'), profile),
+        h('div', { class: 'field' }, h('label', {}, 'Folder'), folder),
+        h('div', { class: 'field' }, h('label', {}, 'Priority'), priority))),
+    h('div', { class: 'form-row' },
       h('label', {}, 'Request filter'),
       h('div', {},
         h('div', { class: 'row' }, matchType, pattern),
@@ -1278,6 +1444,9 @@ function renderRuleEditor() {
       ...draft,
       name: name.value.trim() || 'Unnamed rule',
       enabled: enabled.checked,
+      profile: profile.value.trim() || 'default',
+      folder: folder.value.trim(),
+      priority: Number(priority.value) || 0,
       actions: form.advanced ? draft.actions : actionsFromForm(form),
       match: {
         ...draft.match,
@@ -1944,6 +2113,9 @@ function renderSettings() {
   const filterNegate = h('input', { type: 'checkbox', checked: s.captureFilter.negate });
 
   const bypass = h('textarea', { class: 'input', style: 'min-height:70px' }, (s.bypassHosts || []).join('\n'));
+  const upstreamProxy = h('input', { class: 'input', value: s.upstreamProxy || '', placeholder: 'http://user:pass@proxy:8080 or socks5://proxy:1080' });
+  const upstreamRoutes = h('textarea', { class: 'input', style: 'min-height:90px', placeholder: '*.internal.test http://proxy:8080' },
+    (s.upstreamProxyRoutes || []).map((route) => `${route.pattern} ${route.url}`).join('\n'));
   const bpPattern = h('input', { class: 'input grow', value: (s.breakpoints || {}).urlPattern || '', placeholder: 'only break on URLs containing…' });
 
   panel.appendChild(h('div', {},
@@ -1983,9 +2155,23 @@ function renderSettings() {
       toggle('interceptHttps', 'Intercept HTTPS (MITM)', 'When off, TLS connections are tunnelled without decryption.'),
       toggle('protectEmailTraffic', 'Protect email traffic from HTTPS interception', 'Tunnels mail ports and common mail or sign-in hosts unchanged. Disable only when you intentionally need to inspect them.'),
       toggle('decodeContentEncoding', 'Decode gzip/deflate/brotli responses', 'Needed to read and edit compressed bodies.'),
+      toggle('enableHttp2Upstream', 'Use HTTP/2 upstream when available', 'Negotiates HTTP/2 for direct HTTPS requests and falls back to HTTP/1.1.'),
       toggle('rejectUnauthorized', 'Verify upstream TLS certificates', 'Turn on to refuse invalid upstream certificates.'),
       number('maxBodySize', 'Max buffered body size (bytes)', 'Larger payloads stream through and cannot be modified.'),
       number('maxFlows', 'Max captured requests kept in memory'),
+      h('div', { class: 'field' }, h('label', {}, 'Default upstream proxy'), upstreamProxy,
+        h('div', { class: 'muted small' }, 'Supports HTTP, HTTPS and SOCKS proxy URLs, including URL-encoded credentials.')),
+      h('div', { class: 'field' }, h('label', {}, 'Per-host proxy routes'), upstreamRoutes,
+        h('button', {
+          class: 'btn', style: 'margin-top:6px',
+          onclick: () => patchSettings({
+            upstreamProxy: upstreamProxy.value.trim(),
+            upstreamProxyRoutes: upstreamRoutes.value.split('\n').map((line) => {
+              const space = line.trim().indexOf(' ');
+              return space < 0 ? null : { pattern: line.trim().slice(0, space), url: line.trim().slice(space + 1).trim() };
+            }).filter((route) => route && route.pattern && route.url)
+          })
+        }, 'Save upstream routing')),
       h('div', { class: 'field' }, h('label', {}, 'Bypass hosts (one per line, wildcards allowed)'), bypass,
         h('button', {
           class: 'btn',
