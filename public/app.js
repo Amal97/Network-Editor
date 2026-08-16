@@ -100,6 +100,7 @@ const state = {
   ruleAnalytics: {},
   ruleConflicts: [],
   ruleInsightTimer: null,
+  sessions: [],
   selectedId: null,
   selectedRuleId: null,
   draft: null,
@@ -189,6 +190,8 @@ async function init() {
   wireChrome();
   renderRules();
   await refreshRuleInsights();
+  renderComposer();
+  await refreshSessions();
   renderSettings();
   renderHelp();
   renderBreakpointBar();
@@ -262,6 +265,7 @@ function wireChrome() {
     const tab = event.target.closest('.tab');
     if (!tab) return;
     if (tab.dataset.view === 'rules') refreshRuleInsights();
+    if (tab.dataset.view === 'sessions') refreshSessions();
     for (const node of document.querySelectorAll('.tab')) node.classList.toggle('active', node === tab);
     for (const view of document.querySelectorAll('.view')) {
       view.classList.toggle('active', view.id === `view-${tab.dataset.view}`);
@@ -300,6 +304,12 @@ function wireChrome() {
   el('flowCompare').addEventListener('click', compareSelectedFlows);
   el('flowDelete').addEventListener('click', deleteSelectedFlows);
 
+  el('composerSend').addEventListener('click', sendComposedRequest);
+  el('composerSave').addEventListener('click', saveComposerTemplate);
+  el('composerSaved').addEventListener('change', loadComposerTemplate);
+  el('composerVariables').addEventListener('change', () => localStorage.setItem('netmod-composer-variables', el('composerVariables').value));
+  el('saveSession').addEventListener('click', saveCurrentSession);
+
   el('addRule').addEventListener('click', createRule);
   el('exportRules').addEventListener('click', exportRules);
   el('importRules').addEventListener('click', importRules);
@@ -329,6 +339,149 @@ function wireChrome() {
       saveDraft();
     }
   });
+}
+
+/* --------------------------------------------------------------- composer */
+
+function renderComposer() {
+  if (!el('composerMethod').options.length) {
+    for (const method of METHODS) el('composerMethod').appendChild(h('option', { value: method }, method));
+  }
+  el('composerVariables').value = localStorage.getItem('netmod-composer-variables') || '';
+  renderComposerTemplates();
+}
+
+function composerTemplates() {
+  try { return JSON.parse(localStorage.getItem('netmod-composer-templates') || '[]'); } catch { return []; }
+}
+
+function renderComposerTemplates() {
+  const select = el('composerSaved');
+  select.innerHTML = '';
+  select.appendChild(h('option', { value: '' }, 'Saved requests'));
+  for (const template of composerTemplates()) select.appendChild(h('option', { value: template.id }, template.name));
+}
+
+function parseComposerHeaders(text) {
+  return String(text || '').split('\n').map((line) => {
+    const colon = line.indexOf(':');
+    return colon < 1 ? null : [line.slice(0, colon).trim(), line.slice(colon + 1).trim()];
+  }).filter(Boolean);
+}
+
+function composerVariables() {
+  return Object.fromEntries(String(el('composerVariables').value || '').split('\n').map((line) => {
+    const equals = line.indexOf('=');
+    return equals < 1 ? null : [line.slice(0, equals).trim(), line.slice(equals + 1).trim()];
+  }).filter(Boolean));
+}
+
+function substituteComposerVariables(value) {
+  const variables = composerVariables();
+  return String(value || '').replace(/\{\{([\w.-]+)\}\}/g, (match, name) => Object.prototype.hasOwnProperty.call(variables, name) ? variables[name] : match);
+}
+
+function readComposer() {
+  return {
+    method: el('composerMethod').value,
+    url: substituteComposerVariables(el('composerUrl').value.trim()),
+    headers: parseComposerHeaders(substituteComposerVariables(el('composerHeaders').value)),
+    body: substituteComposerVariables(el('composerBody').value),
+    applyRules: el('composerRules').checked
+  };
+}
+
+async function sendComposedRequest() {
+  const button = el('composerSend');
+  button.disabled = true;
+  button.textContent = 'Sending…';
+  try {
+    const flow = await api('/api/compose', { method: 'POST', body: readComposer() });
+    el('composerResponse').innerHTML = '';
+    el('composerResponse').append(h('div', { class: 'composer-result-head' },
+      h('strong', { class: flow.error ? 's-err' : `s-${String(flow.status || 0)[0]}` }, flow.error ? 'Error' : `${flow.status} ${flow.statusMessage || ''}`),
+      h('span', { class: 'muted' }, `${formatMs(flow.duration)} · ${formatBytes(flow.responseSize)}`),
+      h('button', { class: 'btn small ghost', onclick: () => openTrafficFlow(flow.id) }, 'Open in Traffic')),
+    h('pre', { class: 'code composer-output' }, flow.response ? messageText(flow.response) : flow.error || 'No response'));
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Send';
+  }
+}
+
+function openTrafficFlow(id) {
+  document.querySelector('.tab[data-view="traffic"]').click();
+  openDetail(id);
+}
+
+function saveComposerTemplate() {
+  const name = prompt('Saved request name');
+  if (!name || !name.trim()) return;
+  const templates = composerTemplates();
+  templates.push({ id: `c${Date.now().toString(36)}`, name: name.trim(), ...readComposer() });
+  localStorage.setItem('netmod-composer-templates', JSON.stringify(templates));
+  renderComposerTemplates();
+  toast('Request saved');
+}
+
+function loadComposerTemplate(event) {
+  const template = composerTemplates().find((item) => item.id === event.target.value);
+  if (!template) return;
+  el('composerMethod').value = template.method;
+  el('composerUrl').value = template.url;
+  el('composerHeaders').value = (template.headers || []).map(([name, value]) => `${name}: ${value}`).join('\n');
+  el('composerBody').value = template.body || '';
+  el('composerRules').checked = template.applyRules !== false;
+}
+
+/* ---------------------------------------------------------------- sessions */
+
+async function refreshSessions() {
+  try {
+    state.sessions = (await api('/api/sessions')).sessions;
+    renderSessions();
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+function renderSessions() {
+  const list = el('sessionList');
+  list.innerHTML = '';
+  if (!state.sessions.length) return list.appendChild(h('div', { class: 'empty' }, h('p', {}, 'No saved sessions'), h('p', { class: 'muted' }, 'Save the current traffic to create one.')));
+  for (const session of state.sessions) list.appendChild(h('article', { class: 'session-item' },
+    h('div', {}, h('strong', {}, session.name), h('p', { class: 'muted small' }, `${session.flowCount} requests · ${new Date(session.createdAt).toLocaleString()}`)),
+    h('div', { class: 'row' },
+      h('button', { class: 'btn small', onclick: () => restoreSession(session.id) }, 'Restore'),
+      h('button', { class: 'btn small ghost danger', onclick: () => deleteSession(session.id) }, 'Delete'))));
+}
+
+async function saveCurrentSession() {
+  const name = el('sessionName').value.trim();
+  if (!name) return toast('Enter a session name', true);
+  try {
+    await api('/api/sessions', { method: 'POST', body: { name } });
+    el('sessionName').value = '';
+    await refreshSessions();
+    toast('Session saved');
+  } catch (err) { toast(err.message, true); }
+}
+
+async function restoreSession(id) {
+  try {
+    const result = await api(`/api/sessions/${id}`, { method: 'POST' });
+    document.querySelector('.tab[data-view="traffic"]').click();
+    toast(`Restored ${result.restored} requests`);
+  } catch (err) { toast(err.message, true); }
+}
+
+async function deleteSession(id) {
+  try {
+    await api(`/api/sessions/${id}`, { method: 'DELETE' });
+    await refreshSessions();
+  } catch (err) { toast(err.message, true); }
 }
 
 function syncToggles() {
@@ -2357,8 +2510,39 @@ function renderSettings() {
   const upstreamRoutes = h('textarea', { class: 'input', style: 'min-height:90px', placeholder: '*.internal.test http://proxy:8080' },
     (s.upstreamProxyRoutes || []).map((route) => `${route.pattern} ${route.url}`).join('\n'));
   const bpPattern = h('input', { class: 'input grow', value: (s.breakpoints || {}).urlPattern || '', placeholder: 'only break on URLs containing…' });
+  const conditions = s.networkConditions || {};
+  const conditionProfile = h('select', { class: 'input' },
+    h('option', { value: 'custom' }, 'Custom'),
+    h('option', { value: 'offline' }, 'Offline'),
+    h('option', { value: 'slow3g' }, 'Slow 3G'),
+    h('option', { value: 'fast3g' }, 'Fast 3G'));
+  const conditionInputs = Object.fromEntries(['latencyMs', 'jitterMs', 'failureRate', 'downloadKbps', 'uploadKbps'].map((key) => [key, h('input', { class: 'input', type: 'number', min: '0', value: conditions[key] || 0 })]));
+  conditionProfile.addEventListener('change', () => {
+    const presets = {
+      offline: { offline: true, latencyMs: 0, jitterMs: 0, failureRate: 0, downloadKbps: 0, uploadKbps: 0 },
+      slow3g: { offline: false, latencyMs: 400, jitterMs: 80, failureRate: 0, downloadKbps: 400, uploadKbps: 400 },
+      fast3g: { offline: false, latencyMs: 150, jitterMs: 30, failureRate: 0, downloadKbps: 1600, uploadKbps: 750 }
+    };
+    const preset = presets[conditionProfile.value];
+    if (!preset) return;
+    for (const [key, input] of Object.entries(conditionInputs)) input.value = preset[key];
+  });
 
   panel.appendChild(h('div', {},
+    h('h2', {}, 'Network conditions'),
+    h('div', { class: 'card' },
+      h('p', { class: 'muted small' }, 'Apply latency, jitter, failures, bandwidth limits, or offline mode to proxied and composed requests.'),
+      h('div', { class: 'cond-grid' },
+        h('div', { class: 'field' }, h('label', {}, 'Profile'), conditionProfile),
+        ...[['latencyMs', 'Latency (ms)'], ['jitterMs', 'Jitter (ms)'], ['failureRate', 'Failure rate (%)'], ['downloadKbps', 'Download (Kbps)'], ['uploadKbps', 'Upload (Kbps)']].map(([key, label]) => h('div', { class: 'field' }, h('label', {}, label), conditionInputs[key]))),
+      h('div', { class: 'row' },
+        h('button', { class: `btn toggle${conditions.enabled ? ' on' : ''}`, onclick: () => patchSettings({ networkConditions: { ...conditions, enabled: !conditions.enabled } }) }, conditions.enabled ? 'Enabled' : 'Disabled'),
+        h('button', { class: 'btn primary', onclick: () => patchSettings({ networkConditions: {
+          enabled: true,
+          offline: conditionProfile.value === 'offline',
+          ...Object.fromEntries(Object.entries(conditionInputs).map(([key, input]) => [key, Number(input.value) || 0]))
+        } }) }, 'Apply conditions'))),
+
     h('h2', {}, 'Capture filter'),
     h('div', { class: 'card' },
       h('p', { class: 'muted small' }, 'Requests that do not pass this filter are proxied untouched: they are neither shown nor processed by rules.'),

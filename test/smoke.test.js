@@ -558,6 +558,40 @@ test('exposes flows, rules and settings over the local API', async () => {
   assert.equal(removed.status, 200);
 });
 
+test('composes requests, saves sessions and applies network conditions', async () => {
+  setRules([]);
+  app.store.clear();
+  app.config.updateSettings({
+    networkConditions: { enabled: true, latencyMs: 40, jitterMs: 0, failureRate: 0, offline: false }
+  });
+  const composed = await uiRequest('/api/compose', {
+    method: 'POST',
+    body: {
+      method: 'POST',
+      url: `${originUrl}/echo?source=composer`,
+      headers: [['Content-Type', 'text/plain'], ['X-Composer', 'yes']],
+      body: 'composer body',
+      applyRules: false
+    }
+  });
+  assert.equal(composed.status, 200);
+  assert.equal(composed.body.status, 200);
+  assert.ok(composed.body.duration >= 35);
+  assert.equal(JSON.parse(composed.body.response.body).body, 'composer body');
+
+  const saved = await uiRequest('/api/sessions', { method: 'POST', body: { name: 'Composer test' } });
+  assert.equal(saved.status, 201);
+  assert.equal(saved.body.session.flowCount, 1);
+  app.store.clear();
+
+  const restored = await uiRequest(`/api/sessions/${saved.body.session.id}`, { method: 'POST' });
+  assert.equal(restored.body.restored, 1);
+  const detail = await uiRequest(`/api/flows/${composed.body.id}`);
+  assert.equal(detail.body.request.body, 'composer body');
+  await uiRequest(`/api/sessions/${saved.body.session.id}`, { method: 'DELETE' });
+  app.config.updateSettings({ networkConditions: { enabled: false, latencyMs: 0 } });
+});
+
 test('searches captured headers, bodies and JSON paths', async () => {
   setRules([]);
   await proxyRequest(`${originUrl}/echo`, {

@@ -23,7 +23,16 @@ const DEFAULT_SETTINGS = {
   activeRuleProfiles: ['*'],
   upstreamProxy: '',
   upstreamProxyRoutes: [],
-  bypassHosts: []
+  bypassHosts: [],
+  networkConditions: {
+    enabled: false,
+    offline: false,
+    latencyMs: 0,
+    jitterMs: 0,
+    failureRate: 0,
+    downloadKbps: 0,
+    uploadKbps: 0
+  }
 };
 
 class Config {
@@ -42,7 +51,8 @@ class Config {
         ...DEFAULT_SETTINGS,
         ...(raw.settings || {}),
         breakpoints: { ...DEFAULT_SETTINGS.breakpoints, ...(raw.settings || {}).breakpoints },
-        captureFilter: { ...DEFAULT_SETTINGS.captureFilter, ...(raw.settings || {}).captureFilter }
+        captureFilter: { ...DEFAULT_SETTINGS.captureFilter, ...(raw.settings || {}).captureFilter },
+        networkConditions: { ...DEFAULT_SETTINGS.networkConditions, ...(raw.settings || {}).networkConditions }
       };
       if (Number(raw.version || 1) < 2) this.settings.activeRuleProfiles = ['*'];
       this.rules = (raw.rules || []).map(makeRule);
@@ -72,7 +82,8 @@ class Config {
       ...this.settings,
       ...patch,
       breakpoints: { ...this.settings.breakpoints, ...(patch.breakpoints || {}) },
-      captureFilter: { ...this.settings.captureFilter, ...(patch.captureFilter || {}) }
+      captureFilter: { ...this.settings.captureFilter, ...(patch.captureFilter || {}) },
+      networkConditions: { ...this.settings.networkConditions, ...(patch.networkConditions || {}) }
     };
     this.save();
     return this.settings;

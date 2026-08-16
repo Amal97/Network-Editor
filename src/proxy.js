@@ -351,6 +351,7 @@ class ProxyServer extends EventEmitter {
 
       if (directives.cancel) return this.cancelRequest(flow, res, directives.cancelReason, captured);
       if (directives.delayMs > 0) await sleep(directives.delayMs);
+      await this.applyNetworkConditions(flow);
 
       if (directives.mock) {
         flow.response = {
@@ -367,7 +368,7 @@ class ProxyServer extends EventEmitter {
         return this.finishResponse(flow, res, captured, directives.throttle);
       }
 
-      await this.forward(flow, res, captured, directives.throttle);
+      await this.forward(flow, res, captured, this.downloadThrottle(directives.throttle));
     } catch (err) {
       this.fail(flow, res, err, captured);
     }
@@ -626,6 +627,16 @@ class ProxyServer extends EventEmitter {
 
     if (applyRules) recordRules(flow, this.rules.apply(flow, 'request'));
 
+    try {
+      await this.applyNetworkConditions(flow);
+    } catch (err) {
+      flow.state = 'error';
+      flow.error = err.message;
+      flow.endTime = Date.now();
+      this.store.touch(flow);
+      return flow;
+    }
+
     const { isTls, options } = this.buildUpstreamOptions(flow);
     const transport = isTls ? https : http;
 
@@ -646,6 +657,8 @@ class ProxyServer extends EventEmitter {
           size: collected.size
         };
         if (applyRules) recordRules(flow, this.rules.apply(flow, 'response'));
+        const throttle = this.downloadThrottle(0);
+        if (throttle && flow.response.body) await sleep((flow.response.body.length / throttle) * 1000);
         flow.state = 'completed';
         flow.endTime = Date.now();
         this.store.touch(flow);
@@ -661,6 +674,47 @@ class ProxyServer extends EventEmitter {
       if (flow.request.body && flow.request.body.length) req.write(flow.request.body);
       req.end();
     });
+  }
+
+  async compose(spec = {}) {
+    const url = new URL(String(spec.url || ''));
+    const headers = Array.isArray(spec.headers) ? spec.headers : [];
+    if (!headers.some(([name]) => String(name).toLowerCase() === 'host')) headers.push(['Host', url.host]);
+    const source = {
+      id: 'composer',
+      scheme: url.protocol.slice(0, -1),
+      resourceType: detectResourceType(String(spec.method || 'GET'), url.toString(), Object.fromEntries(headers)),
+      request: {
+        method: String(spec.method || 'GET').toUpperCase(),
+        url: url.toString(),
+        headers,
+        body: spec.bodyEncoding === 'base64' ? Buffer.from(String(spec.body || ''), 'base64') : Buffer.from(String(spec.body || ''), 'utf8')
+      }
+    };
+    return this.replay(source, {}, { applyRules: spec.applyRules !== false });
+  }
+
+  async applyNetworkConditions(flow) {
+    const conditions = this.settings.networkConditions || {};
+    if (!conditions.enabled) return;
+    if (conditions.offline) throw new Error('Simulated offline mode');
+    if (Number(conditions.failureRate) > 0 && Math.random() * 100 < Number(conditions.failureRate)) {
+      throw new Error('Simulated network failure');
+    }
+    const jitter = Number(conditions.jitterMs) || 0;
+    const latency = Math.max(0, (Number(conditions.latencyMs) || 0) + (jitter ? (Math.random() * 2 - 1) * jitter : 0));
+    const upload = Number(conditions.uploadKbps) || 0;
+    const uploadDelay = upload > 0 && flow.request.body ? (flow.request.body.length / (upload * 1024 / 8)) * 1000 : 0;
+    if (latency + uploadDelay > 0) await sleep(latency + uploadDelay);
+  }
+
+  downloadThrottle(ruleThrottle) {
+    const conditions = this.settings.networkConditions || {};
+    const globalThrottle = conditions.enabled && Number(conditions.downloadKbps) > 0
+      ? Number(conditions.downloadKbps) * 1024 / 8
+      : 0;
+    if (ruleThrottle > 0 && globalThrottle > 0) return Math.min(ruleThrottle, globalThrottle);
+    return ruleThrottle || globalThrottle;
   }
 }
 

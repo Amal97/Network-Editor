@@ -133,6 +133,28 @@ class ApiServer {
     if (route === '/api/flows/har' && method === 'GET') {
       return sendJson(res, 200, buildHar(this.store.flows));
     }
+    if (route === '/api/compose' && method === 'POST') {
+      const body = await readJson(req);
+      if (!/^https?:\/\//i.test(String(body.url || ''))) return sendJson(res, 400, { error: 'A valid HTTP or HTTPS URL is required' });
+      const flow = await this.proxy.compose(body);
+      return sendJson(res, 200, detail(flow));
+    }
+    if (route === '/api/sessions' && method === 'GET') {
+      return sendJson(res, 200, { sessions: this.listSessions() });
+    }
+    if (route === '/api/sessions' && method === 'POST') {
+      const body = await readJson(req);
+      const session = this.saveSession(String(body.name || '').trim());
+      return sendJson(res, 201, { session });
+    }
+    if (segments[1] === 'sessions' && segments[2] && method === 'POST') {
+      const count = this.restoreSession(segments[2]);
+      return sendJson(res, 200, { restored: count });
+    }
+    if (segments[1] === 'sessions' && segments[2] && method === 'DELETE') {
+      this.deleteSession(segments[2]);
+      return sendJson(res, 200, { ok: true });
+    }
 
     if (segments[1] === 'flows' && segments[2]) {
       const flow = this.store.get(segments[2]);
@@ -349,6 +371,39 @@ class ApiServer {
     this.push('rules', this.config.rules);
   }
 
+  sessionsDir() {
+    return path.join(this.config.dataDir, 'sessions');
+  }
+
+  listSessions() {
+    try {
+      return fs.readdirSync(this.sessionsDir()).filter((name) => name.endsWith('.json')).map((name) => {
+        const saved = JSON.parse(fs.readFileSync(path.join(this.sessionsDir(), name), 'utf8'));
+        return { id: saved.id, name: saved.name, createdAt: saved.createdAt, flowCount: saved.flows.length };
+      }).sort((left, right) => right.createdAt - left.createdAt);
+    } catch {
+      return [];
+    }
+  }
+
+  saveSession(name) {
+    if (!name) throw new Error('Session name is required');
+    const session = { id: `s${Date.now().toString(36)}`, name, createdAt: Date.now(), flows: this.store.snapshot() };
+    fs.mkdirSync(this.sessionsDir(), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(this.sessionsDir(), `${session.id}.json`), JSON.stringify(session));
+    return { id: session.id, name, createdAt: session.createdAt, flowCount: session.flows.length };
+  }
+
+  restoreSession(id) {
+    const file = path.join(this.sessionsDir(), `${safeId(id)}.json`);
+    const session = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return this.store.restore(session.flows);
+  }
+
+  deleteSession(id) {
+    fs.unlinkSync(path.join(this.sessionsDir(), `${safeId(id)}.json`));
+  }
+
   state() {
     const address = this.proxy.server.address();
     return {
@@ -478,6 +533,11 @@ function toCurl(flow) {
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function safeId(value) {
+  if (!/^[a-z0-9_-]+$/i.test(String(value))) throw new Error('Invalid session ID');
+  return String(value);
 }
 
 function buildHar(flows) {

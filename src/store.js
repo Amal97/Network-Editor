@@ -73,6 +73,23 @@ class FlowStore extends EventEmitter {
     return removed;
   }
 
+  snapshot() {
+    return this.flows.map((flow) => serializeFlow(flow));
+  }
+
+  restore(snapshot) {
+    this.clear();
+    for (const record of snapshot || []) {
+      const flow = deserializeFlow(record);
+      flow.seq = ++this.seq;
+      this.flows.push(flow);
+      this.byId.set(flow.id, flow);
+      this.emit('flow', { type: 'new', flow: summarize(flow) });
+    }
+    this.trim();
+    return this.flows.length;
+  }
+
   trim() {
     while (this.flows.length > this.maxFlows) {
       const removed = this.flows.shift();
@@ -141,6 +158,24 @@ function serializeMessage(message) {
     headers: message.headers,
     ...encodeBody(message.body, getHeader(message.headers, 'content-type'), message.truncated)
   };
+}
+
+function serializeFlow(flow) {
+  return JSON.parse(JSON.stringify(flow, (key, value) => {
+    if (Buffer.isBuffer(value)) return { __netmodBuffer: value.toString('base64') };
+    if (value && value.type === 'Buffer' && Array.isArray(value.data)) {
+      return { __netmodBuffer: Buffer.from(value.data).toString('base64') };
+    }
+    if (key === 'stream') return null;
+    return value;
+  }));
+}
+
+function deserializeFlow(record) {
+  return JSON.parse(JSON.stringify(record), (key, value) => {
+    if (value && value.__netmodBuffer !== undefined) return Buffer.from(value.__netmodBuffer, 'base64');
+    return value;
+  });
 }
 
 function encodeBody(buffer, contentType, truncated) {

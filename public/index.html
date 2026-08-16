@@ -19,7 +19,9 @@
 
     <nav class="tabs" id="mainTabs" aria-label="Main navigation">
       <button class="tab active" data-view="traffic">Traffic</button>
+      <button class="tab" data-view="composer">Composer</button>
       <button class="tab" data-view="rules">Rules <span class="pill" id="rulesCount">0</span></button>
+      <button class="tab" data-view="sessions">Sessions</button>
       <button class="tab" data-view="settings">Settings</button>
       <button class="tab" data-view="help">Guide</button>
     </nav>
@@ -98,6 +100,33 @@
       </div>
     </section>
 
+    <!-- ----------------------------------------------------------- Composer -->
+    <section class="view" id="view-composer">
+      <div class="workspace composer-workspace">
+        <div class="workspace-head">
+          <div><h2>Request Composer</h2><p class="muted">Build, save, and send requests through the modifier.</p></div>
+          <div class="row"><select id="composerSaved" class="input"><option value="">Saved requests</option></select><button id="composerSave" class="btn ghost">Save</button></div>
+        </div>
+        <div class="composer-target">
+          <select id="composerMethod" class="input" aria-label="Request method"></select>
+          <input id="composerUrl" class="input grow" aria-label="Request URL" placeholder="https://api.example.com/users" />
+          <button id="composerSend" class="btn primary">Send</button>
+        </div>
+        <div class="composer-grid">
+          <section>
+            <div class="field"><label>Headers</label><textarea id="composerHeaders" class="input code-input" placeholder="Content-Type: application/json"></textarea></div>
+            <div class="field"><label>Body</label><textarea id="composerBody" class="input code-input body-input" placeholder='{"name":"Ada"}'></textarea></div>
+            <label class="check"><input id="composerRules" type="checkbox" checked /> Apply active rules</label>
+          </section>
+          <aside>
+            <div class="field"><label>Environment variables</label><textarea id="composerVariables" class="input code-input" placeholder='baseUrl=https://api.example.com&#10;token=secret'></textarea></div>
+            <p class="muted small">Use variables as {{name}} in URLs, headers, and bodies. Values stay in this browser.</p>
+          </aside>
+        </div>
+        <section class="composer-response" id="composerResponse"><div class="empty"><p class="muted">Send a request to inspect its response.</p></div></section>
+      </div>
+    </section>
+
     <!-- -------------------------------------------------------------- Rules -->
     <section class="view" id="view-rules">
       <div class="rules-layout">
@@ -129,6 +158,17 @@
         <div class="rule-resizer" id="ruleResizer" role="separator" aria-label="Resize rules sidebar" aria-orientation="vertical" tabindex="0"></div>
 
         <section class="rule-editor" id="ruleEditor"></section>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------------ Sessions -->
+    <section class="view" id="view-sessions">
+      <div class="workspace sessions-workspace">
+        <div class="workspace-head">
+          <div><h2>Saved Sessions</h2><p class="muted">Capture the current traffic set and restore it later.</p></div>
+          <div class="row"><input id="sessionName" class="input" placeholder="Session name" /><button id="saveSession" class="btn primary">Save current</button></div>
+        </div>
+        <div id="sessionList" class="session-list"></div>
       </div>
     </section>
 
