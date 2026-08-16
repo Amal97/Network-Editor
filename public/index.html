@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Network Modifier</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111827'/%3E%3Cpath d='M6 16h7l3-7 4 14 3-7h3' stroke='%2338bdf8' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div class="brand-text">
+        <strong>Network Modifier</strong>
+        <span class="proxy-address" id="proxyAddress">Starting...</span>
+      </div>
+    </div>
+
+    <nav class="tabs" id="mainTabs" aria-label="Main navigation">
+      <button class="tab active" data-view="traffic">Traffic</button>
+      <button class="tab" data-view="rules">Rules <span class="pill" id="rulesCount">0</span></button>
+      <button class="tab" data-view="settings">Settings</button>
+      <button class="tab" data-view="help">Guide</button>
+    </nav>
+
+    <div class="top-actions">
+      <button id="recordToggle" class="btn toggle" title="Pause or resume capturing">Recording</button>
+      <button id="connectBtn" class="btn primary" title="Send traffic through the proxy">Connect</button>
+      <span class="status-dot" id="connDot" title="Live connection"></span>
+    </div>
+  </header>
+
+  <main>
+    <!-- ------------------------------------------------------------ Traffic -->
+    <section class="view active" id="view-traffic">
+      <div class="toolbar">
+        <div class="toolbar-primary">
+          <input id="quickFilter" class="input grow" type="search" aria-label="Filter traffic" placeholder="Filter traffic" />
+          <select id="sourceFilter" class="input" aria-label="Traffic source">
+            <option value="">All sources</option>
+            <option value="browser">Browsers</option>
+            <option value="other">Other clients</option>
+          </select>
+          <select id="typeFilter" class="input" aria-label="Resource type"><option value="">All types</option></select>
+          <select id="statusFilter" class="input" aria-label="Response status">
+            <option value="">All statuses</option>
+            <option value="2">2xx</option>
+            <option value="3">3xx</option>
+            <option value="4">4xx</option>
+            <option value="5">5xx</option>
+            <option value="err">Errors / cancelled</option>
+            <option value="mod">Modified only</option>
+          </select>
+        </div>
+        <div class="toolbar-secondary">
+          <button id="bpRequest" class="btn toggle" title="Pause every request for manual editing">Request pause</button>
+          <button id="bpResponse" class="btn toggle" title="Pause every response for manual editing">Response pause</button>
+          <span class="counter" id="flowCounter">0 requests</span>
+          <button id="exportHar" class="btn ghost small">Export</button>
+          <button id="clearFlows" class="btn ghost small">Clear</button>
+        </div>
+      </div>
+
+      <div class="bulkbar" id="flowBulk" hidden>
+        <strong id="flowBulkCount">0 selected</strong>
+        <button class="btn small danger" id="flowDelete">Delete selected</button>
+        <button class="btn small ghost" id="flowBulkClear">Clear selection</button>
+      </div>
+
+      <div class="split">
+        <div class="flow-list-wrap">
+          <table class="flow-table">
+            <thead>
+              <tr>
+                <th class="pick"><input type="checkbox" id="flowSelectAll" title="Select all shown" /></th>
+                <th style="width:66px">Method</th>
+                <th style="width:58px">Status</th>
+                <th>URL</th>
+                <th style="width:84px">Type</th>
+                <th style="width:72px">Size</th>
+                <th style="width:66px">Time</th>
+              </tr>
+            </thead>
+            <tbody id="flowBody"></tbody>
+          </table>
+          <div class="empty" id="flowEmpty">
+            <p>No traffic captured yet</p>
+            <p class="muted">Connect a browser to start inspecting requests.</p>
+            <button class="btn primary empty-action" onclick="document.getElementById('connectBtn').click()">Connect a browser</button>
+          </div>
+        </div>
+
+        <div class="detail" id="detail">
+          <div class="empty"><p class="muted">Select a request to inspect it.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- -------------------------------------------------------------- Rules -->
+    <section class="view" id="view-rules">
+      <div class="rules-layout">
+        <aside class="rule-sidebar">
+          <div class="sidebar-head">
+            <div class="sidebar-title">
+              <strong>Rules</strong>
+              <button id="addRule" class="btn primary small">New rule</button>
+            </div>
+            <input id="ruleSearch" class="input" type="search" placeholder="Search rules" />
+            <div class="sidebar-tools">
+              <label class="check small"><input type="checkbox" id="ruleSelectAll" /> Select all</label>
+              <span class="spacer"></span>
+              <button id="importRules" class="btn small ghost">Import</button>
+              <button id="exportRules" class="btn small ghost">Export</button>
+            </div>
+          </div>
+          <div class="bulkbar" id="ruleBulk" hidden>
+            <strong id="ruleBulkCount">0 selected</strong>
+            <button class="btn small ghost" id="ruleEnable">Enable</button>
+            <button class="btn small ghost" id="ruleDisable">Disable</button>
+            <button class="btn small ghost" id="ruleDuplicate">Duplicate</button>
+            <button class="btn small danger" id="ruleDelete">Delete</button>
+          </div>
+          <div class="rule-list" id="ruleList"></div>
+        </aside>
+
+        <section class="rule-editor" id="ruleEditor"></section>
+      </div>
+    </section>
+
+    <!-- ----------------------------------------------------------- Settings -->
+    <section class="view" id="view-settings">
+      <div class="panel" id="settingsPanel"></div>
+    </section>
+
+    <!-- --------------------------------------------------------------- Help -->
+    <section class="view" id="view-help">
+      <div class="panel" id="helpPanel"></div>
+    </section>
+  </main>
+
+  <div class="breakpoint-bar" id="breakpointBar" hidden>
+    <span id="breakpointText"></span>
+    <button class="btn small" id="openBreakpoint">Open</button>
+    <button class="btn small ghost" id="resumeAll">Resume all</button>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" hidden>
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

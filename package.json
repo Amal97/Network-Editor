@@ -1,0 +1,39 @@
+{
+  "name": "network-modifier",
+  "version": "1.0.0",
+  "description": "A cross-platform debugging proxy that intercepts and mutates HTTP/HTTPS requests and responses (Fiddler / Charles style) with rules, scripts and breakpoints.",
+  "main": "src/index.js",
+  "bin": {
+    "netmod": "bin/netmod.js",
+    "network-modifier": "bin/netmod.js"
+  },
+  "scripts": {
+    "start": "node bin/netmod.js start",
+    "trust": "node bin/netmod.js trust",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "proxy",
+    "debugging-proxy",
+    "mitm",
+    "http",
+    "https",
+    "intercept",
+    "fiddler",
+    "charles",
+    "devtools"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "node-forge": "^1.3.1"
+  },
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "README.md"
+  ]
+}
