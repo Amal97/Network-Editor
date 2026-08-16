@@ -178,20 +178,31 @@ table.kv td:first-child { width: 32%; padding-right: 18px; color: var(--ink-fain
 .ws-frame textarea { width: 100%; min-height: 72px; border: 0; border-radius: 0 0 var(--radius) var(--radius); font: 12.5px/1.5 var(--mono); }
 
 /* Rules */
-.rules-layout { flex: 1; display: grid; grid-template-columns: 310px minmax(0, 1fr); min-height: 0; }
+.rules-layout { --rule-sidebar-width: 310px; flex: 1; display: grid; grid-template-columns: var(--rule-sidebar-width) 6px minmax(0, 1fr); min-height: 0; }
 .rule-sidebar { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--surface); }
+.rule-resizer { position: relative; z-index: 4; cursor: col-resize; background: var(--canvas); touch-action: none; }
+.rule-resizer::after { content: ""; position: absolute; inset: 0 2px; background: var(--line); transition: background .15s; }
+.rule-resizer:hover::after, .rule-resizer:focus-visible::after, .resizing-rules .rule-resizer::after { background: var(--accent); }
+.resizing-rules { cursor: col-resize; user-select: none; }
 .sidebar-head { display: flex; flex-direction: column; gap: 9px; padding: 16px; border-bottom: 1px solid var(--line); }
 .sidebar-title { display: flex; align-items: center; justify-content: space-between; min-height: 32px; }
 .sidebar-title strong { font-size: 18px; } .sidebar-head .input { width: 100%; }
 .sidebar-tools { display: flex; align-items: center; gap: 4px; }
 .rule-list { flex: 1; overflow: auto; }
-.rule-folder { position: sticky; top: 0; z-index: 2; padding: 7px 14px; border-bottom: 1px solid var(--line); background: #f4f6f8; color: var(--ink-faint); font-size: 11px; font-weight: 650; text-transform: uppercase; }
+.rule-folder-group { display: block; }
+.rule-folder { position: sticky; top: 0; z-index: 2; display: grid; grid-template-columns: 14px minmax(0,1fr) auto; align-items: center; gap: 5px; width: 100%; padding: 7px 12px; border: 0; border-bottom: 1px solid var(--line); background: #f4f6f8; color: var(--ink-faint); cursor: pointer; font-size: 11px; font-weight: 650; text-align: left; text-transform: uppercase; }
+.rule-folder:hover { background: #e9edf1; color: var(--ink-soft); }
+.rule-folder-chevron { font-size: 17px; line-height: 12px; transform: rotate(90deg); transition: transform .15s; }
+.rule-folder[aria-expanded="false"] .rule-folder-chevron { transform: rotate(0); }
+.rule-folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rule-folder-count { min-width: 20px; padding: 1px 5px; border-radius: 8px; background: #dfe4e9; font: 10px var(--mono); text-align: center; }
 .rule-item { display: flex; align-items: flex-start; gap: 9px; min-height: 63px; padding: 12px 14px; border-bottom: 1px solid #edf0f2; cursor: pointer; }
 .rule-item[draggable="true"] { cursor: grab; }
 .rule-item:hover { background: #f5f7f9; } .rule-item.selected { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
 .rule-body { min-width: 0; flex: 1; } .rule-name { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .rule-meta { overflow: hidden; margin-top: 3px; color: var(--ink-faint); font: 12px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .rule-item.disabled .rule-body { opacity: .5; }
+.rule-sidebar > .bulkbar { flex-wrap: wrap; }
 .switch { position: relative; width: 30px; height: 17px; margin-top: 1px; flex: none; }
 .switch input { position: absolute; width: 100%; height: 100%; margin: 0; opacity: 0; }
 .switch span { position: absolute; inset: 0; border-radius: 9px; background: #c8ced4; pointer-events: none; transition: background .15s; }
@@ -289,6 +300,7 @@ table.kv td:first-child { width: 32%; padding-right: 18px; color: var(--ink-fain
   .split { grid-template-columns: 1fr; grid-template-rows: minmax(230px,44%) minmax(0,1fr); }
   .flow-list-wrap { border-right: 0; border-bottom: 1px solid var(--line); }
   .rules-layout { grid-template-columns: 240px minmax(0,1fr); }
+  .rule-resizer { display: none; }
   .form-row { grid-template-columns: 110px minmax(0,1fr); gap: 14px; }
   .cond-grid { grid-template-columns: 1fr; } .panel { padding: 30px 28px 70px; }
 }

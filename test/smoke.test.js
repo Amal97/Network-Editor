@@ -205,7 +205,16 @@ test('applies only active rule profiles in priority order', async () => {
   ]);
   await proxyRequest(`${originUrl}/echo`);
   assert.equal(lastRequest.headers['x-priority'], 'low');
-  app.ruleEngine.setActiveProfiles(['default']);
+
+  app.ruleEngine.setActiveProfiles(['*']);
+  setRules([
+    { name: 'default', profile: 'default', enabled: true, match: {}, actions: [{ type: 'set-request-header', name: 'x-default-profile', value: 'yes' }] },
+    { name: 'staging', profile: 'staging', enabled: true, match: {}, actions: [{ type: 'set-request-header', name: 'x-staging-profile', value: 'yes' }] }
+  ]);
+  await proxyRequest(`${originUrl}/echo`);
+  assert.equal(lastRequest.headers['x-default-profile'], 'yes');
+  assert.equal(lastRequest.headers['x-staging-profile'], 'yes');
+  app.ruleEngine.setActiveProfiles(['*']);
 });
 
 test('redirects a request to an arbitrary URL', async () => {

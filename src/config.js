@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS = {
   breakpointsEnabled: true,
   breakpoints: { onRequest: false, onResponse: false, urlPattern: '' },
   captureFilter: { urlPattern: '', matchType: 'contains', methods: [], resourceTypes: [], negate: false },
-  activeRuleProfiles: ['default'],
+  activeRuleProfiles: ['*'],
   upstreamProxy: '',
   upstreamProxyRoutes: [],
   bypassHosts: []
@@ -44,6 +44,7 @@ class Config {
         breakpoints: { ...DEFAULT_SETTINGS.breakpoints, ...(raw.settings || {}).breakpoints },
         captureFilter: { ...DEFAULT_SETTINGS.captureFilter, ...(raw.settings || {}).captureFilter }
       };
+      if (Number(raw.version || 1) < 2) this.settings.activeRuleProfiles = ['*'];
       this.rules = (raw.rules || []).map(makeRule);
       this.snippets = raw.snippets || [];
     } catch {
@@ -57,7 +58,7 @@ class Config {
     fs.mkdirSync(this.dataDir, { recursive: true, mode: 0o700 });
     const tmp = `${this.file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify({
-      version: 1,
+      version: 2,
       settings: this.settings,
       rules: this.rules,
       snippets: this.snippets

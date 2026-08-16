@@ -238,6 +238,7 @@ function handleEvent(event, data) {
     case 'settings':
       state.settings = data;
       syncToggles();
+      renderRuleList();
       renderSettings();
       break;
     case 'log':
@@ -295,7 +296,8 @@ function wireChrome() {
   el('exportRules').addEventListener('click', exportRules);
   el('importRules').addEventListener('click', importRules);
   el('ruleSearch').addEventListener('input', renderRuleList);
-  el('ruleProfile').addEventListener('change', (event) => patchSettings({ activeRuleProfiles: [event.target.value] }));
+  el('ruleProfile').addEventListener('change', (event) => activateRuleProfile(event.target.value));
+  wireRuleResizer();
   el('ruleSelectAll').addEventListener('change', (event) => {
     state.pickedRules = event.target.checked ? new Set(visibleRules().map((r) => r.id)) : new Set();
     renderRuleList();
@@ -334,10 +336,60 @@ async function patchSettings(patch) {
     const data = await api('/api/settings', { method: 'PATCH', body: { settings: patch } });
     state.settings = data.settings;
     syncToggles();
+    renderRuleList();
     renderSettings();
   } catch (err) {
     toast(err.message, true);
   }
+}
+
+async function activateRuleProfile(profile) {
+  state.settings.activeRuleProfiles = [profile || '*'];
+  renderRuleList();
+  await patchSettings({ activeRuleProfiles: state.settings.activeRuleProfiles });
+  renderRuleList();
+}
+
+function wireRuleResizer() {
+  const layout = document.querySelector('.rules-layout');
+  const resizer = el('ruleResizer');
+  const saved = Number(localStorage.getItem('netmod-rule-sidebar-width'));
+  if (saved) setRuleSidebarWidth(saved);
+
+  const resize = (clientX) => {
+    const bounds = layout.getBoundingClientRect();
+    setRuleSidebarWidth(clientX - bounds.left);
+  };
+  resizer.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    resizer.setPointerCapture(event.pointerId);
+    document.body.classList.add('resizing-rules');
+  });
+  resizer.addEventListener('pointermove', (event) => {
+    if (resizer.hasPointerCapture(event.pointerId)) resize(event.clientX);
+  });
+  const finish = (event) => {
+    if (!resizer.hasPointerCapture(event.pointerId)) return;
+    resizer.releasePointerCapture(event.pointerId);
+    document.body.classList.remove('resizing-rules');
+    localStorage.setItem('netmod-rule-sidebar-width', String(document.querySelector('.rule-sidebar').getBoundingClientRect().width));
+  };
+  resizer.addEventListener('pointerup', finish);
+  resizer.addEventListener('pointercancel', finish);
+  resizer.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const width = document.querySelector('.rule-sidebar').getBoundingClientRect().width;
+    setRuleSidebarWidth(width + (event.key === 'ArrowRight' ? 20 : -20));
+    localStorage.setItem('netmod-rule-sidebar-width', String(document.querySelector('.rule-sidebar').getBoundingClientRect().width));
+  });
+}
+
+function setRuleSidebarWidth(width) {
+  const layout = document.querySelector('.rules-layout');
+  const available = layout.getBoundingClientRect().width || document.querySelector('main').getBoundingClientRect().width;
+  const maximum = Math.max(280, available - 320);
+  layout.style.setProperty('--rule-sidebar-width', `${Math.round(Math.min(maximum, Math.max(260, width)))}px`);
 }
 
 /* --------------------------------------------------------------- flow table */
@@ -1077,9 +1129,9 @@ function describeSystemProxy(proxy) {
 
 function visibleRules() {
   const query = (el('ruleSearch').value || '').trim().toLowerCase();
-  const profile = el('ruleProfile').value || (state.settings.activeRuleProfiles || ['default'])[0];
+  const profile = el('ruleProfile').value || (state.settings.activeRuleProfiles || ['*'])[0];
   return state.rules.filter((rule) => {
-    if ((rule.profile || 'default') !== profile) return false;
+    if (profile !== '*' && (rule.profile || 'default') !== profile) return false;
     if (!query) return true;
     const haystack = `${rule.name} ${rule.folder || ''} ${rule.match.urlPattern} ${rule.actions.map((a) => a.type).join(' ')}`;
     return haystack.toLowerCase().includes(query);
@@ -1094,11 +1146,12 @@ function renderRules() {
 function renderRuleList() {
   el('rulesCount').textContent = state.rules.filter((r) => r.enabled).length;
   const profileSelect = el('ruleProfile');
-  const selectedProfile = (state.settings.activeRuleProfiles || ['default'])[0];
+  const selectedProfile = (state.settings.activeRuleProfiles || ['*'])[0];
   const profiles = [...new Set(['default', ...state.rules.map((rule) => rule.profile || 'default')])].sort();
   profileSelect.innerHTML = '';
+  profileSelect.appendChild(h('option', { value: '*' }, 'All profiles'));
   for (const profile of profiles) profileSelect.appendChild(h('option', { value: profile }, profile));
-  profileSelect.value = profiles.includes(selectedProfile) ? selectedProfile : 'default';
+  profileSelect.value = selectedProfile === '*' || profiles.includes(selectedProfile) ? selectedProfile : 'default';
   const list = el('ruleList');
   const rules = visibleRules();
   list.innerHTML = '';
@@ -1108,15 +1161,42 @@ function renderRuleList() {
       h('p', { class: 'muted' }, state.rules.length ? 'No rules match your search.' : 'No rules yet.')));
   }
 
-  let currentFolder = null;
+  const groups = new Map();
   for (const rule of rules) {
     const folder = rule.folder || 'Ungrouped';
-    if (folder !== currentFolder) {
-      currentFolder = folder;
-      list.appendChild(h('div', { class: 'rule-folder' }, folder));
-    }
-    const summary = describeRule(rule);
-    const item = h('div', {
+    if (!groups.has(folder)) groups.set(folder, []);
+    groups.get(folder).push(rule);
+  }
+
+  for (const [folder, folderRules] of groups) {
+    const storageKey = `netmod-rule-folder:${profileSelect.value}:${folder}`;
+    const collapsed = localStorage.getItem(storageKey) === 'closed';
+    const contents = h('div', { class: 'rule-folder-contents', hidden: collapsed });
+    const toggle = h('button', {
+      class: 'rule-folder',
+      type: 'button',
+      'aria-expanded': String(!collapsed),
+      onclick: () => {
+        const closing = !contents.hidden;
+        contents.hidden = closing;
+        toggle.setAttribute('aria-expanded', String(!closing));
+        localStorage.setItem(storageKey, closing ? 'closed' : 'open');
+      }
+    },
+    h('span', { class: 'rule-folder-chevron', 'aria-hidden': 'true' }, '›'),
+    h('span', { class: 'rule-folder-name' }, folder),
+    h('span', { class: 'rule-folder-count' }, folderRules.length));
+
+    for (const rule of folderRules) contents.appendChild(renderRuleItem(rule));
+    list.appendChild(h('section', { class: 'rule-folder-group' }, toggle, contents));
+  }
+
+  renderRuleBulk();
+}
+
+function renderRuleItem(rule) {
+  const summary = describeRule(rule);
+  return h('div', {
       class: `rule-item${rule.id === state.selectedRuleId ? ' selected' : ''}${rule.enabled ? '' : ' disabled'}`,
       draggable: 'true',
       'data-rule-id': rule.id,
@@ -1151,11 +1231,7 @@ function renderRuleList() {
       h('div', { class: 'rule-body' },
         h('div', { class: 'rule-name', title: rule.name }, rule.name),
         h('div', { class: 'rule-meta', title: summary }, `P${rule.priority || 0} · ${summary}`))
-    );
-    list.appendChild(item);
-  }
-
-  renderRuleBulk();
+  );
 }
 
 async function reorderRule(sourceId, targetId) {

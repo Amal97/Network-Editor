@@ -245,7 +245,7 @@ function applyBodyToResponse(flow, body) {
 class RuleEngine {
   constructor({ scriptEngine, onScriptLog }) {
     this.rules = [];
-    this.activeProfiles = new Set(['default']);
+    this.activeProfiles = new Set(['*']);
     this.scriptEngine = scriptEngine;
     this.onScriptLog = onScriptLog || (() => {});
   }
@@ -255,7 +255,7 @@ class RuleEngine {
   }
 
   setActiveProfiles(profiles) {
-    this.activeProfiles = new Set(Array.isArray(profiles) && profiles.length ? profiles : ['default']);
+    this.activeProfiles = new Set(Array.isArray(profiles) && profiles.length ? profiles : ['*']);
   }
 
   apply(flow, phase) {
@@ -265,7 +265,8 @@ class RuleEngine {
     };
 
     for (const rule of this.rules) {
-      if (!rule.enabled || !this.activeProfiles.has(rule.profile || 'default')) continue;
+      const allProfiles = this.activeProfiles.has('*');
+      if (!rule.enabled || (!allProfiles && !this.activeProfiles.has(rule.profile || 'default'))) continue;
       let captures;
       try {
         captures = matchRule(rule, flow, phase);
