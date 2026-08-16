@@ -217,6 +217,21 @@ test('applies only active rule profiles in priority order', async () => {
   app.ruleEngine.setActiveProfiles(['*']);
 });
 
+test('reports rule hit analytics', async () => {
+  const rule = { id: 'analytics-rule', name: 'analytics', profile: 'default', priority: 10, enabled: true, match: { urlPattern: '/analytics', matchType: 'contains' }, actions: [{ type: 'delay-request', ms: 5 }, { type: 'set-request-header', name: 'x-analytics', value: 'yes' }] };
+  const competing = { id: 'analytics-competing', name: 'competing', profile: 'default', priority: 1, enabled: true, match: { urlPattern: '/analytics', matchType: 'contains' }, actions: [{ type: 'set-request-header', name: 'x-analytics', value: 'other' }] };
+  setRules([rule, competing]);
+  await proxyRequest(`${originUrl}/analytics`);
+  const report = await uiRequest('/api/rules/analytics');
+  const metrics = report.body.analytics[rule.id];
+  assert.equal(metrics.hits, 1);
+  assert.equal(metrics.requestHits, 1);
+  assert.equal(metrics.totalDelayMs, 5);
+  assert.ok(metrics.lastMatched);
+  assert.equal(metrics.recentFlowIds.length, 1);
+  assert.ok(report.body.conflicts.some((conflict) => conflict.type === 'competing-write' && conflict.ruleIds.includes(rule.id)));
+});
+
 test('redirects a request to an arbitrary URL', async () => {
   setRules([{
     name: 'redirect',

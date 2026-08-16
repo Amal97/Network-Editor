@@ -246,6 +246,7 @@ class RuleEngine {
   constructor({ scriptEngine, onScriptLog }) {
     this.rules = [];
     this.activeProfiles = new Set(['*']);
+    this.analytics = new Map();
     this.scriptEngine = scriptEngine;
     this.onScriptLog = onScriptLog || (() => {});
   }
@@ -256,6 +257,14 @@ class RuleEngine {
 
   setActiveProfiles(profiles) {
     this.activeProfiles = new Set(Array.isArray(profiles) && profiles.length ? profiles : ['*']);
+  }
+
+  getAnalytics() {
+    return Object.fromEntries(this.rules.map((rule) => [rule.id, {
+      hits: 0, requestHits: 0, responseHits: 0, errors: 0, totalDelayMs: 0,
+      totalProcessingMs: 0, lastMatched: null, recentFlowIds: [],
+      ...(this.analytics.get(rule.id) || {})
+    }]));
   }
 
   apply(flow, phase) {
@@ -277,6 +286,9 @@ class RuleEngine {
       if (!captures) continue;
 
       let matchedAction = false;
+      const started = performance.now();
+      const errorsBefore = result.errors.length;
+      const delayBefore = result.delayMs;
       for (const action of rule.actions || []) {
         const set = phase === 'request' ? REQUEST_ACTIONS : RESPONSE_ACTIONS;
         if (!set.has(action.type)) continue;
@@ -288,10 +300,32 @@ class RuleEngine {
         }
         if (result.cancel || result.mock) break;
       }
-      if (matchedAction) result.applied.push({ id: rule.id, name: rule.name, phase });
+      if (matchedAction) {
+        result.applied.push({ id: rule.id, name: rule.name, phase });
+        this.recordAnalytics(rule, flow, phase, {
+          errors: result.errors.length - errorsBefore,
+          delayMs: result.delayMs - delayBefore,
+          processingMs: performance.now() - started
+        });
+      }
       if (result.cancel || result.mock) break;
     }
     return result;
+  }
+
+  recordAnalytics(rule, flow, phase, delta) {
+    const current = this.analytics.get(rule.id) || {
+      hits: 0, requestHits: 0, responseHits: 0, errors: 0, totalDelayMs: 0,
+      totalProcessingMs: 0, lastMatched: null, recentFlowIds: []
+    };
+    current.hits++;
+    current[phase === 'request' ? 'requestHits' : 'responseHits']++;
+    current.errors += delta.errors;
+    current.totalDelayMs += delta.delayMs;
+    current.totalProcessingMs += delta.processingMs;
+    current.lastMatched = Date.now();
+    current.recentFlowIds = [flow.id, ...current.recentFlowIds.filter((id) => id !== flow.id)].slice(0, 20);
+    this.analytics.set(rule.id, current);
   }
 
   applyAction(action, flow, phase, captures, result) {
@@ -524,6 +558,64 @@ function createScriptContext(flow, phase, result) {
   };
 }
 
+function analyzeRuleConflicts(rules) {
+  const ordered = rules.map(makeRule).filter((rule) => rule.enabled)
+    .sort((left, right) => right.priority - left.priority);
+  const conflicts = [];
+  for (let leftIndex = 0; leftIndex < ordered.length; leftIndex++) {
+    for (let rightIndex = leftIndex + 1; rightIndex < ordered.length; rightIndex++) {
+      const earlier = ordered[leftIndex];
+      const later = ordered[rightIndex];
+      if (!rulesMayOverlap(earlier, later)) continue;
+      const earlierTargets = actionTargets(earlier.actions);
+      const laterTargets = actionTargets(later.actions);
+      for (const target of earlierTargets.writes) {
+        if (laterTargets.writes.has(target)) conflicts.push({
+          severity: 'warning', type: 'competing-write', ruleIds: [earlier.id, later.id],
+          message: `${earlier.name} and ${later.name} both modify ${target}; ${later.name} runs last.`
+        });
+      }
+      if (earlierTargets.terminal && laterTargets.hasActions) conflicts.push({
+        severity: 'warning', type: 'unreachable', ruleIds: [earlier.id, later.id],
+        message: `${earlier.name} can ${earlierTargets.terminal} before ${later.name} runs.`
+      });
+    }
+  }
+  return conflicts;
+}
+
+function rulesMayOverlap(left, right) {
+  if ((left.profile || 'default') !== (right.profile || 'default')) return false;
+  const leftMatch = left.match || {};
+  const rightMatch = right.match || {};
+  const rightMethods = (rightMatch.methods || []).map((method) => method.toUpperCase());
+  const methodsOverlap = !leftMatch.methods?.length || !rightMethods.length ||
+    leftMatch.methods.some((method) => rightMethods.includes(method.toUpperCase()));
+  const protocolsOverlap = !leftMatch.protocol || leftMatch.protocol === 'any' ||
+    !rightMatch.protocol || rightMatch.protocol === 'any' || leftMatch.protocol === rightMatch.protocol;
+  const patternsOverlap = !leftMatch.urlPattern || !rightMatch.urlPattern ||
+    ((leftMatch.matchType || 'contains') === (rightMatch.matchType || 'contains') && leftMatch.urlPattern === rightMatch.urlPattern);
+  return methodsOverlap && protocolsOverlap && patternsOverlap;
+}
+
+function actionTargets(actions = []) {
+  const writes = new Set();
+  let terminal = '';
+  for (const action of actions) {
+    const type = action.type;
+    if (type === 'redirect') writes.add('request URL');
+    if (type === 'set-method') writes.add('request method');
+    if (type === 'set-request-body') writes.add('request body');
+    if (type === 'set-response-body') writes.add('response body');
+    if (type === 'set-status') writes.add('response status');
+    if (/^(set|add|remove)-request-header$/.test(type)) writes.add(`request header ${String(action.name || '').toLowerCase() || '*'}`);
+    if (/^(set|add|remove)-response-header$/.test(type)) writes.add(`response header ${String(action.name || '').toLowerCase() || '*'}`);
+    if (type === 'cancel') terminal = 'block the request';
+    if (type === 'mock-response' || type === 'map-local') terminal = 'return a response';
+  }
+  return { writes, terminal, hasActions: actions.length > 0 };
+}
+
 module.exports = {
   RuleEngine,
   makeRule,
@@ -534,5 +626,6 @@ module.exports = {
   applyBodyToResponse,
   ACTION_CATALOG,
   REQUEST_ACTIONS,
-  RESPONSE_ACTIONS
+  RESPONSE_ACTIONS,
+  analyzeRuleConflicts
 };

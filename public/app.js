@@ -97,6 +97,9 @@ const state = {
   rows: new Map(),
   pickedFlows: new Set(),
   pickedRules: new Set(),
+  ruleAnalytics: {},
+  ruleConflicts: [],
+  ruleInsightTimer: null,
   selectedId: null,
   selectedRuleId: null,
   draft: null,
@@ -185,6 +188,7 @@ async function init() {
 
   wireChrome();
   renderRules();
+  await refreshRuleInsights();
   renderSettings();
   renderHelp();
   renderBreakpointBar();
@@ -209,6 +213,7 @@ function handleEvent(event, data) {
     case 'flow':
     case 'flow-update':
       upsertFlow(data);
+      if (data.state === 'completed' || data.state === 'error' || data.state === 'cancelled') scheduleRuleInsights();
       if (data.id === state.selectedId && (data.state === 'completed' || data.state === 'error')) {
         openDetail(data.id, true);
       }
@@ -234,6 +239,7 @@ function handleEvent(event, data) {
     case 'rules':
       state.rules = data;
       renderRules();
+      scheduleRuleInsights();
       break;
     case 'settings':
       state.settings = data;
@@ -255,6 +261,7 @@ function wireChrome() {
   el('mainTabs').addEventListener('click', (event) => {
     const tab = event.target.closest('.tab');
     if (!tab) return;
+    if (tab.dataset.view === 'rules') refreshRuleInsights();
     for (const node of document.querySelectorAll('.tab')) node.classList.toggle('active', node === tab);
     for (const view of document.querySelectorAll('.view')) {
       view.classList.toggle('active', view.id === `view-${tab.dataset.view}`);
@@ -290,6 +297,7 @@ function wireChrome() {
     renderFlowBulk();
   });
   el('flowBulkClear').addEventListener('click', clearFlowSelection);
+  el('flowCompare').addEventListener('click', compareSelectedFlows);
   el('flowDelete').addEventListener('click', deleteSelectedFlows);
 
   el('addRule').addEventListener('click', createRule);
@@ -453,7 +461,127 @@ function renderFlowBulk() {
   const count = state.pickedFlows.size;
   el('flowBulk').hidden = count === 0;
   el('flowBulkCount').textContent = `${count} selected`;
+  el('flowCompare').disabled = count !== 2;
   if (!count) el('flowSelectAll').checked = false;
+}
+
+async function compareSelectedFlows() {
+  const ids = [...state.pickedFlows];
+  if (ids.length !== 2) return;
+  try {
+    const [left, right] = await Promise.all(ids.map((id) => api(`/api/flows/${id}`)));
+    const content = h('div', { class: 'flow-compare' },
+      comparisonSection('Overview', comparisonOverview(left), comparisonOverview(right), left, right),
+      comparisonSection('Request', messageText(left.request), messageText(right.request), left, right),
+      comparisonSection('Response', left.response ? messageText(left.response) : 'No response', right.response ? messageText(right.response) : 'No response', left, right),
+      comparisonSection('Timing and rules', comparisonTiming(left), comparisonTiming(right), left, right));
+    openModal('Compare traffic', content, [{ label: 'Close', primary: true, onClick: closeModal }]);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+function comparisonSection(title, leftText, rightText, left, right) {
+  return h('section', { class: 'compare-section' },
+    h('h3', { class: 'section-title' }, title),
+    unifiedDiff(leftText, rightText, compareLabel(left), compareLabel(right)));
+}
+
+function unifiedDiff(leftText, rightText, leftLabel, rightLabel) {
+  const diff = h('div', { class: 'unified-diff' },
+    h('div', { class: 'diff-line diff-file diff-remove' }, `--- ${leftLabel}`),
+    h('div', { class: 'diff-line diff-file diff-add' }, `+++ ${rightLabel}`));
+  for (const part of compactDiff(lineDiff(leftText, rightText))) {
+    if (part.type === 'skip') {
+      diff.appendChild(h('div', { class: 'diff-line diff-hunk' }, `@@ ${part.count} unchanged lines @@`));
+      continue;
+    }
+    const marker = part.type === 'add' ? '+' : part.type === 'remove' ? '-' : ' ';
+    diff.appendChild(h('div', { class: `diff-line diff-${part.type}` },
+      h('span', { class: 'diff-marker', 'aria-hidden': 'true' }, marker),
+      h('span', {}, part.text || ' ')));
+  }
+  return diff;
+}
+
+function lineDiff(leftText, rightText) {
+  const left = String(leftText).split('\n');
+  const right = String(rightText).split('\n');
+  if (left.length * right.length > 1500000) {
+    return [
+      ...left.map((text) => ({ type: 'remove', text })),
+      ...right.map((text) => ({ type: 'add', text }))
+    ];
+  }
+  const lengths = Array.from({ length: left.length + 1 }, () => new Uint32Array(right.length + 1));
+  for (let leftIndex = left.length - 1; leftIndex >= 0; leftIndex--) {
+    for (let rightIndex = right.length - 1; rightIndex >= 0; rightIndex--) {
+      lengths[leftIndex][rightIndex] = left[leftIndex] === right[rightIndex]
+        ? lengths[leftIndex + 1][rightIndex + 1] + 1
+        : Math.max(lengths[leftIndex + 1][rightIndex], lengths[leftIndex][rightIndex + 1]);
+    }
+  }
+  const parts = [];
+  let leftIndex = 0;
+  let rightIndex = 0;
+  while (leftIndex < left.length && rightIndex < right.length) {
+    if (left[leftIndex] === right[rightIndex]) {
+      parts.push({ type: 'context', text: left[leftIndex++] });
+      rightIndex++;
+    } else if (lengths[leftIndex + 1][rightIndex] >= lengths[leftIndex][rightIndex + 1]) {
+      parts.push({ type: 'remove', text: left[leftIndex++] });
+    } else {
+      parts.push({ type: 'add', text: right[rightIndex++] });
+    }
+  }
+  while (leftIndex < left.length) parts.push({ type: 'remove', text: left[leftIndex++] });
+  while (rightIndex < right.length) parts.push({ type: 'add', text: right[rightIndex++] });
+  return parts;
+}
+
+function compactDiff(parts) {
+  const compact = [];
+  for (let index = 0; index < parts.length;) {
+    if (parts[index].type !== 'context') {
+      compact.push(parts[index++]);
+      continue;
+    }
+    let end = index;
+    while (end < parts.length && parts[end].type === 'context') end++;
+    const run = parts.slice(index, end);
+    if (run.length > 8) compact.push(...run.slice(0, 3), { type: 'skip', count: run.length - 6 }, ...run.slice(-3));
+    else compact.push(...run);
+    index = end;
+  }
+  return compact;
+}
+
+function compareLabel(flow) {
+  let path = flow.url;
+  try { path = new URL(flow.url).pathname; } catch { /* use full URL */ }
+  return `${flow.method} ${path}`;
+}
+
+function comparisonOverview(flow) {
+  return [
+    `URL: ${flow.url}`,
+    `Status: ${flow.status || flow.state} ${flow.statusMessage || ''}`.trim(),
+    `Protocol: ${flow.scheme.toUpperCase()} / HTTP ${flow.response?.httpVersion || flow.request.httpVersion || ''}`,
+    `Type: ${flow.resourceType}`,
+    `Request size: ${formatBytes(flow.requestSize)}`,
+    `Response size: ${formatBytes(flow.responseSize)}`
+  ].join('\n');
+}
+
+function comparisonTiming(flow) {
+  return [
+    `Duration: ${formatMs(flow.duration)}`,
+    `Upstream start: ${relative(flow.timing.upstreamStart, flow.startTime)}`,
+    `First byte: ${relative(flow.timing.firstByte, flow.startTime)}`,
+    `Response complete: ${relative(flow.timing.responseReceived, flow.startTime)}`,
+    `Rules: ${(flow.rulesApplied || []).map((rule) => `${rule.name} (${rule.phase})`).join(', ') || 'none'}`,
+    `Errors: ${(flow.errors || []).join('; ') || 'none'}`
+  ].join('\n');
 }
 
 function clearFlowSelection() {
@@ -1143,6 +1271,22 @@ function renderRules() {
   syncEditor();
 }
 
+function scheduleRuleInsights() {
+  clearTimeout(state.ruleInsightTimer);
+  state.ruleInsightTimer = setTimeout(refreshRuleInsights, 180);
+}
+
+async function refreshRuleInsights() {
+  try {
+    const report = await api('/api/rules/analytics');
+    state.ruleAnalytics = report.analytics || {};
+    state.ruleConflicts = report.conflicts || [];
+    renderRules();
+  } catch (err) {
+    console.warn('[netmod] rule insights:', err.message);
+  }
+}
+
 function renderRuleList() {
   el('rulesCount').textContent = state.rules.filter((r) => r.enabled).length;
   const profileSelect = el('ruleProfile');
@@ -1196,6 +1340,11 @@ function renderRuleList() {
 
 function renderRuleItem(rule) {
   const summary = describeRule(rule);
+  const metrics = state.ruleAnalytics[rule.id] || {};
+  const conflicts = state.ruleConflicts.filter((conflict) => conflict.ruleIds.includes(rule.id));
+  const insight = metrics.hits
+    ? `${metrics.hits} hit${metrics.hits === 1 ? '' : 's'} · req ${metrics.requestHits || 0} / res ${metrics.responseHits || 0} · ${metrics.errors || 0} errors · ${Math.round(metrics.totalDelayMs || 0)}ms delay · ${timeAgo(metrics.lastMatched)}`
+    : 'No matches yet';
   return h('div', {
       class: `rule-item${rule.id === state.selectedRuleId ? ' selected' : ''}${rule.enabled ? '' : ' disabled'}`,
       draggable: 'true',
@@ -1229,9 +1378,19 @@ function renderRuleItem(rule) {
         }),
         h('span')),
       h('div', { class: 'rule-body' },
-        h('div', { class: 'rule-name', title: rule.name }, rule.name),
-        h('div', { class: 'rule-meta', title: summary }, `P${rule.priority || 0} · ${summary}`))
+        h('div', { class: 'rule-name', title: rule.name }, rule.name,
+          conflicts.length ? h('span', { class: 'rule-warning', title: conflicts.map((conflict) => conflict.message).join('\n') }, ` ${conflicts.length} warning${conflicts.length === 1 ? '' : 's'}`) : null),
+        h('div', { class: 'rule-meta', title: summary }, `P${rule.priority || 0} · ${summary}`),
+        h('div', { class: 'rule-insight', title: insight }, insight))
   );
+}
+
+function timeAgo(timestamp) {
+  if (!timestamp) return 'never';
+  const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return `${Math.floor(seconds / 3600)}h ago`;
 }
 
 async function reorderRule(sourceId, targetId) {
@@ -1406,6 +1565,11 @@ function renderRuleEditor() {
         await api(`/api/rules/${draft.id}`, { method: 'DELETE' });
       }
     }, 'Delete')));
+
+  const conflicts = state.ruleConflicts.filter((conflict) => conflict.ruleIds.includes(draft.id));
+  if (conflicts.length) editor.appendChild(h('div', { class: 'rule-conflicts' },
+    h('strong', {}, `${conflicts.length} potential conflict${conflicts.length === 1 ? '' : 's'}`),
+    ...conflicts.map((conflict) => h('p', {}, conflict.message))));
 
   /* ---------------------------------------------------------------- when */
 

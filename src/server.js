@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { detail, summarize } = require('./store');
-const { makeRule, matchRule, ACTION_CATALOG } = require('./rules');
+const { makeRule, matchRule, ACTION_CATALOG, analyzeRuleConflicts } = require('./rules');
 const { RESOURCE_TYPES, mimeForPath, getHeader } = require('./util');
 const { trustCa, setSystemProxy, getSystemProxy, findBrowsers, launchBrowser } = require('./platform');
 
@@ -183,6 +183,12 @@ class ApiServer {
 
     if (route === '/api/rules' && method === 'GET') {
       return sendJson(res, 200, { rules: this.config.rules });
+    }
+    if (route === '/api/rules/analytics' && method === 'GET') {
+      return sendJson(res, 200, {
+        analytics: this.ruleEngine.getAnalytics(),
+        conflicts: analyzeRuleConflicts(this.config.rules)
+      });
     }
     if (route === '/api/rules' && method === 'POST') {
       const body = await readJson(req);
