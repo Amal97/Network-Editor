@@ -1,0 +1,7 @@
+{
+  "version": 3,
+  "sources": ["../src/devtools.ts"],
+  "sourcesContent": ["chrome.devtools.panels.create('Network Modifier', '', 'panel.html');\n"],
+  "mappings": ";AAAA,OAAO,SAAS,OAAO,OAAO,oBAAoB,IAAI,YAAY;",
+  "names": []
+}

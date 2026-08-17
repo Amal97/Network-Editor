@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="panel">
+  <aside>
+    <header class="brand">
+      <span class="logo"></span>
+      <div><strong>Network Modifier</strong><small>Frontend API debugger</small></div>
+    </header>
+    <nav><button class="nav active">Traffic</button></nav>
+    <div class="rules-head">
+      <strong>Rules</strong>
+      <button id="newRule" class="icon-button" title="New rule">+</button>
+    </div>
+    <div id="ruleList" class="rule-list"></div>
+  </aside>
+  <main>
+    <div class="toolbar">
+      <input id="search" placeholder="Search requests">
+      <span id="count">0 requests</span>
+      <button id="pause">Pause</button>
+      <button id="clear">Clear</button>
+    </div>
+    <div class="traffic-layout">
+      <div id="trafficList" class="traffic-list"></div>
+      <div id="detail" class="detail">
+        <div class="empty">Select a request to inspect its request and response.</div>
+      </div>
+    </div>
+  </main>
+  <dialog id="ruleDialog">
+    <form method="dialog">
+      <header><strong>Edit rule</strong></header>
+      <label>Name<input id="ruleName"></label>
+      <div class="form-grid">
+        <label>Method
+          <select id="ruleMethod">
+            <option>*</option><option>GET</option><option>POST</option>
+            <option>PUT</option><option>PATCH</option><option>DELETE</option>
+          </select>
+        </label>
+        <label>Delay (ms)<input id="ruleDelay" type="number" min="0"></label>
+      </div>
+      <label>URL pattern<input id="ruleUrl" placeholder="/api/users or ^https://api\."></label>
+      <label>Request body<textarea id="requestBody" placeholder="Use {{body}} to include the original body"></textarea></label>
+      <div class="form-grid">
+        <label>Status code<input id="responseStatus" type="number" min="100" max="599" placeholder="Keep actual status"></label>
+        <label class="check"><input id="ruleError" type="checkbox"> Simulate network error</label>
+      </div>
+      <label>Response body<textarea id="responseBody" placeholder='{"users": []} or {{body}}'></textarea></label>
+      <footer>
+        <button id="deleteRule" class="danger" type="button">Delete</button>
+        <span></span>
+        <button id="cancelRule" type="button">Cancel</button>
+        <button id="saveRule" class="primary" type="button">Save rule</button>
+      </footer>
+    </form>
+  </dialog>
+  <script type="module" src="panel.js"></script>
+</body>
+</html>
