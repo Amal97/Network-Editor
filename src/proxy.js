@@ -35,6 +35,18 @@ const MAIL_SERVICE_DOMAINS = [
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 128 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 128 });
 
+const TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/** Returns unique, RFC-valid subprotocol tokens; anything malformed is dropped rather than forwarded. */
+function parseSubprotocols(header) {
+  const seen = new Set();
+  for (const part of String(header || '').split(',')) {
+    const token = part.trim();
+    if (token && TOKEN.test(token)) seen.add(token);
+  }
+  return [...seen];
+}
+
 class ProxyServer extends EventEmitter {
   constructor({ config, ca, store, ruleEngine, breakpoints }) {
     super();
@@ -185,13 +197,30 @@ class ProxyServer extends EventEmitter {
     if (this.shouldCapture(flow)) this.store.add(flow);
     const wsUrl = target.replace(/^http/i, 'ws');
     const headers = Object.fromEntries(req.headers ? Object.entries(req.headers).filter(([name]) =>
-      !['connection', 'upgrade', 'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions', 'host'].includes(name.toLowerCase())) : []);
+      !['connection', 'upgrade', 'sec-websocket-key', 'sec-websocket-version', 'sec-websocket-extensions', 'sec-websocket-protocol', 'host'].includes(name.toLowerCase())) : []);
     const proxyUrl = this.resolveUpstreamProxy(new URL(target));
-    const upstream = new WebSocket(wsUrl, req.headers['sec-websocket-protocol'] || undefined, {
-      headers,
-      rejectUnauthorized: this.settings.rejectUnauthorized,
-      agent: proxyUrl ? this.proxyAgent(proxyUrl, target.startsWith('https:')) : undefined
-    });
+
+    const failFlow = (message) => {
+      flow.error = message;
+      flow.state = 'error';
+      flow.endTime = Date.now();
+      if (this.store.get(flow.id)) this.store.touch(flow);
+      socket.destroy();
+    };
+
+    let upstream;
+    try {
+      // `ws` throws synchronously on malformed/duplicated subprotocols, so only forward valid tokens.
+      const protocols = parseSubprotocols(req.headers['sec-websocket-protocol']);
+      upstream = new WebSocket(wsUrl, protocols.length ? protocols : undefined, {
+        headers,
+        rejectUnauthorized: this.settings.rejectUnauthorized,
+        agent: proxyUrl ? this.proxyAgent(proxyUrl, target.startsWith('https:')) : undefined
+      });
+    } catch (err) {
+      failFlow(err.message);
+      return;
+    }
 
     upstream.once('open', () => {
       this.webSocketServer.handleUpgrade(req, socket, head, (client) => {
@@ -216,13 +245,7 @@ class ProxyServer extends EventEmitter {
         upstream.on('error', (err) => { flow.error = err.message; });
       });
     });
-    upstream.once('error', (err) => {
-      flow.error = err.message;
-      flow.state = 'error';
-      flow.endTime = Date.now();
-      if (this.store.get(flow.id)) this.store.touch(flow);
-      socket.destroy();
-    });
+    upstream.once('error', (err) => failFlow(err.message));
   }
 
   recordWebSocketFrame(flow, direction, data, isBinary) {

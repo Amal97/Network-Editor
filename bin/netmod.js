@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { NetworkModifier, defaultDataDir } = require('../src'); // eslint-disable-line
 const { CertificateAuthority } = require('../src/ca');
-const { trustCa, untrustCa, setSystemProxy, openBrowser, findBrowsers, launchBrowser } = require('../src/platform');
+const { trustCa, untrustCa, setSystemProxy, disableSystemProxySync, openBrowser, findBrowsers, launchBrowser } = require('../src/platform');
 const pkg = require('../package.json');
 
 const HELP = `
@@ -157,6 +157,7 @@ async function start(args, dataDir) {
     if (app.api.systemProxyOwned) {
       console.log('Restoring the system proxy...');
       await setSystemProxy(false, app.config.settings.host, app.config.settings.proxyPort);
+      app.api.systemProxyOwned = false;
     }
     await app.stop();
     process.exit(0);
@@ -164,6 +165,22 @@ async function start(args, dataDir) {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   process.on('SIGHUP', shutdown);
+
+  // Without this a crash would leave the OS pointing at a dead proxy, killing all network access.
+  process.on('exit', () => {
+    if (app.api.systemProxyOwned) {
+      app.api.systemProxyOwned = false;
+      disableSystemProxySync();
+    }
+  });
+  const crash = (err) => {
+    console.error('\nNetwork Modifier hit an unexpected error:');
+    console.error(err && err.stack ? err.stack : err);
+    if (app.api.systemProxyOwned) console.error('Restoring the system proxy before exiting...');
+    process.exit(1);
+  };
+  process.on('uncaughtException', crash);
+  process.on('unhandledRejection', crash);
 }
 
 async function trust(args, dataDir) {

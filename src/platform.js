@@ -1,6 +1,6 @@
 'use strict';
 
-const { execFile, spawn } = require('child_process');
+const { execFile, execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -87,6 +87,29 @@ async function setSystemProxy(enabled, host, port) {
     return off;
   }
   return { ok: false, stderr: 'System proxy toggling is implemented for macOS and Windows only.' };
+}
+
+/** Blocking proxy reset for crash and exit handlers, where async work would never run. */
+function disableSystemProxySync() {
+  const platform = os.platform();
+  const quiet = { stdio: 'ignore', windowsHide: true };
+  try {
+    if (platform === 'darwin') {
+      const listed = execFileSync('networksetup', ['-listallnetworkservices'], { encoding: 'utf8', windowsHide: true });
+      const services = listed.split('\n').slice(1).map((line) => line.trim()).filter((line) => line && !line.startsWith('*'));
+      for (const service of services) {
+        try { execFileSync('networksetup', ['-setwebproxystate', service, 'off'], quiet); } catch { /* keep clearing the rest */ }
+        try { execFileSync('networksetup', ['-setsecurewebproxystate', service, 'off'], quiet); } catch { /* keep clearing the rest */ }
+      }
+      return true;
+    }
+    if (platform === 'win32') {
+      const key = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings';
+      execFileSync('reg', ['add', key, '/v', 'ProxyEnable', '/t', 'REG_DWORD', '/d', '0', '/f'], quiet);
+      return true;
+    }
+  } catch { /* nothing more can be done while the process is dying */ }
+  return false;
 }
 
 function openBrowser(url) {
@@ -214,5 +237,5 @@ function launchBrowser(id, { host, port, url = 'about:blank', normalProfile = fa
 }
 
 module.exports = {
-  trustCa, untrustCa, setSystemProxy, getSystemProxy, openBrowser, findBrowsers, launchBrowser, run
+  trustCa, untrustCa, setSystemProxy, disableSystemProxySync, getSystemProxy, openBrowser, findBrowsers, launchBrowser, run
 };

@@ -2,15 +2,31 @@
 # Double-click this file in Finder to start Network Modifier.
 cd "$(dirname "$0")" || exit 1
 
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+# Appended, not prepended, so a version manager (nvm/asdf) on the user's PATH still wins.
+export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"
 RUNTIME_DIR="$PWD/.runtime"
 DATA_DIR="${NETMOD_HOME:-$HOME/.network-modifier}"
+MIN_NODE_MAJOR=20
+MIN_NODE_MINOR=19
 
 fail() {
   echo
   echo "Setup could not finish: $1"
   read -r -p "Press return to close."
   exit 1
+}
+
+node_is_supported() {
+  local version major minor
+  version="$("$1" -v 2>/dev/null)" || return 1
+  version="${version#v}"
+  major="${version%%.*}"
+  minor="${version#*.}"
+  minor="${minor%%.*}"
+  case "$major" in '' | *[!0-9]*) return 1 ;; esac
+  case "$minor" in '' | *[!0-9]*) minor=0 ;; esac
+  [ "$major" -gt "$MIN_NODE_MAJOR" ] && return 0
+  [ "$major" -eq "$MIN_NODE_MAJOR" ] && [ "$minor" -ge "$MIN_NODE_MINOR" ]
 }
 
 install_local_node() {
@@ -28,15 +44,30 @@ install_local_node() {
   [ -n "$archive" ] || fail "Could not find a compatible Node.js download."
   curl -fL "https://nodejs.org/dist/latest-v22.x/$archive" -o "$RUNTIME_DIR/$archive" || fail "Could not download Node.js."
   (cd "$RUNTIME_DIR" && grep " $archive$" SHASUMS256.txt | shasum -a 256 -c -) || fail "The Node.js download failed its security check."
+  rm -rf "$RUNTIME_DIR/node"
   tar -xzf "$RUNTIME_DIR/$archive" -C "$RUNTIME_DIR" || fail "Could not unpack Node.js."
   mv "$RUNTIME_DIR/${archive%.tar.gz}" "$RUNTIME_DIR/node" || fail "Could not finish installing Node.js."
   rm -f "$RUNTIME_DIR/$archive" "$checksums"
 }
 
-if ! command -v node >/dev/null 2>&1; then
-  [ -x "$RUNTIME_DIR/node/bin/node" ] || install_local_node
-  export PATH="$RUNTIME_DIR/node/bin:$PATH"
+node_bin=""
+for candidate in "$(command -v node 2>/dev/null)" /opt/homebrew/bin/node /usr/local/bin/node "$RUNTIME_DIR/node/bin/node"; do
+  if [ -n "$candidate" ] && [ -x "$candidate" ] && node_is_supported "$candidate"; then
+    node_bin="$candidate"
+    break
+  fi
+done
+
+if [ -z "$node_bin" ]; then
+  echo "Network Modifier needs Node.js $MIN_NODE_MAJOR.$MIN_NODE_MINOR or newer."
+  install_local_node
+  node_bin="$RUNTIME_DIR/node/bin/node"
+  node_is_supported "$node_bin" || fail "The downloaded Node.js could not be used."
 fi
+
+# Put the chosen install first so `node` and `npm` in this script always agree.
+export PATH="$(dirname "$node_bin"):$PATH"
+echo "Using Node.js $(node -v) from $node_bin"
 
 if [ ! -d node_modules ]; then
   echo "First run: installing dependencies..."
@@ -56,4 +87,8 @@ if [ -z "$cert_hash" ] || [ ! -f "$stamp_path" ] || [ "$(cat "$stamp_path")" != 
 fi
 
 echo "Starting Network Modifier..."
-node bin/netmod.js start --browser "$@" || fail "Network Modifier stopped unexpectedly."
+if ! node bin/netmod.js start --browser "$@"; then
+  echo "Turning the system proxy back off so the internet keeps working..."
+  node bin/netmod.js system-proxy off >/dev/null 2>&1
+  fail "Network Modifier stopped unexpectedly."
+fi
