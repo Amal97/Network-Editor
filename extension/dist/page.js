@@ -1,5 +1,72 @@
 // src/types.ts
-var DEFAULT_SETTINGS = { enabled: true, rules: [] };
+var DEFAULT_NETWORK_CONDITIONS = {
+  offline: false,
+  latencyMs: 0,
+  downloadKbps: 0,
+  uploadKbps: 0,
+  failureRate: 0
+};
+var DEFAULT_SETTINGS = {
+  enabled: true,
+  rules: [],
+  interceptionMode: "page",
+  activeProfiles: ["All"],
+  networkConditions: DEFAULT_NETWORK_CONDITIONS
+};
+
+// src/rule-utils.ts
+function matchRules(settings2, url, method) {
+  if (!settings2.enabled) return [];
+  const activeProfiles = settings2.activeProfiles?.length ? settings2.activeProfiles : ["All"];
+  return settings2.rules.filter((rule) => {
+    if (!rule.enabled || !methodMatches(rule, method)) return false;
+    if (!activeProfiles.includes("All") && rule.profiles?.length && !rule.profiles.some((profile) => activeProfiles.includes(profile))) return false;
+    return urlMatches(rule.urlPattern, url);
+  });
+}
+function urlMatches(pattern, url) {
+  if (!pattern) return true;
+  try {
+    return new RegExp(pattern, "i").test(url);
+  } catch {
+    return url.toLowerCase().includes(pattern.toLowerCase());
+  }
+}
+function applyHeaders(headers, changes) {
+  const output = new Headers(headers);
+  for (const [name, value] of Object.entries(changes || {})) {
+    if (value === "") output.delete(name);
+    else output.set(name, value);
+  }
+  return output;
+}
+function applyJsonEdits(body, edits) {
+  if (!edits?.length) return body;
+  const document = JSON.parse(body);
+  for (const edit of edits) setJsonPath(document, edit.path, parseJsonValue(edit.value));
+  return JSON.stringify(document, null, 2);
+}
+function methodMatches(rule, method) {
+  return !rule.method || rule.method === "*" || rule.method.toUpperCase() === method.toUpperCase();
+}
+function parseJsonValue(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+function setJsonPath(document, path, value) {
+  const segments = path.replace(/^\$\.?/, "").replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
+  if (!segments.length || typeof document !== "object" || document === null) throw new Error(`Invalid JSON path: ${path}`);
+  let cursor = document;
+  for (const segment of segments.slice(0, -1)) {
+    const next = cursor[segment];
+    if (typeof next !== "object" || next === null) cursor[segment] = {};
+    cursor = cursor[segment];
+  }
+  cursor[segments.at(-1)] = value;
+}
 
 // src/page.ts
 var settings = DEFAULT_SETTINGS;
@@ -11,16 +78,8 @@ window.addEventListener("message", (event) => {
 });
 window.postMessage({ source: "network-modifier-page", type: "config-request" }, "*");
 function matchingRules(url, method) {
-  if (!settings.enabled) return [];
-  return settings.rules.filter((rule) => {
-    if (!rule.enabled || rule.method && rule.method !== "*" && rule.method !== method.toUpperCase()) return false;
-    if (!rule.urlPattern) return true;
-    try {
-      return new RegExp(rule.urlPattern, "i").test(url);
-    } catch {
-      return url.toLowerCase().includes(rule.urlPattern.toLowerCase());
-    }
-  });
+  if (settings.interceptionMode === "full") return [];
+  return matchRules(settings, url, method);
 }
 function headersToObject(headers) {
   return Object.fromEntries(headers.entries());
@@ -33,6 +92,21 @@ function id() {
 }
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function applyNetworkConditions() {
+  const conditions = settings.networkConditions;
+  if (!conditions) return;
+  if (conditions.offline || Math.random() < conditions.failureRate) throw new TypeError("Network request failed by Network Modifier");
+  if (conditions.latencyMs > 0) await sleep(conditions.latencyMs);
+}
+async function throttleBody(body, kilobitsPerSecond) {
+  if (kilobitsPerSecond <= 0 || !body) return;
+  await sleep(Math.ceil(new TextEncoder().encode(body).byteLength * 8 / kilobitsPerSecond));
+}
+function pauseAtBreakpoint(kind, rules) {
+  if (rules.some((rule) => kind === "request" ? rule.breakOnRequest : rule.breakOnResponse)) {
+    debugger;
+  }
 }
 function applyTemplate(template, original) {
   return template.replaceAll("{{body}}", original);
@@ -49,6 +123,8 @@ window.fetch = async (input, init) => {
   const startedAt = Date.now();
   let request = new Request(input, init);
   const rules = matchingRules(request.url, request.method);
+  await applyNetworkConditions();
+  pauseAtBreakpoint("request", rules);
   const originalRequestBody = await readRequestBody(request);
   let requestBody = originalRequestBody;
   for (const rule of rules) {
@@ -61,10 +137,18 @@ window.fetch = async (input, init) => {
     if (rule.requestBody && !["GET", "HEAD"].includes(request.method)) requestBody = applyTemplate(rule.requestBody, requestBody);
   }
   if (requestBody !== originalRequestBody) {
-    const headers = new Headers(request.headers);
+    let headers = new Headers(request.headers);
+    for (const rule of rules) headers = applyHeaders(headers, rule.requestHeaders);
     headers.delete("content-length");
     request = new Request(request, { body: requestBody, headers });
+  } else if (rules.some((rule) => rule.requestHeaders && Object.keys(rule.requestHeaders).length)) {
+    let headers = new Headers(request.headers);
+    for (const rule of rules) headers = applyHeaders(headers, rule.requestHeaders);
+    request = new Request(request, { headers });
   }
+  for (const rule of rules) requestBody = applyJsonEdits(requestBody, rule.requestJsonEdits);
+  if (requestBody !== originalRequestBody && !["GET", "HEAD"].includes(request.method)) request = new Request(request, { body: requestBody });
+  await throttleBody(requestBody, settings.networkConditions?.uploadKbps || 0);
   try {
     let response;
     const mockRule = [...rules].reverse().find((rule) => rule.responseBody || rule.responseStatus);
@@ -83,12 +167,21 @@ window.fetch = async (input, init) => {
         responseBody = applyTemplate(rule.responseBody, responseBody);
         modified = true;
       }
+      if (rule.responseJsonEdits?.length) {
+        responseBody = applyJsonEdits(responseBody, rule.responseJsonEdits);
+        modified = true;
+      }
       if (rule.responseStatus) {
         status = rule.responseStatus;
         modified = true;
       }
     }
-    const finalResponse = modified ? new Response([204, 205, 304].includes(status) ? null : responseBody, { status, statusText: response.statusText, headers: response.headers }) : response;
+    let responseHeaders = new Headers(response.headers);
+    for (const rule of rules) responseHeaders = applyHeaders(responseHeaders, rule.responseHeaders);
+    if (rules.some((rule) => rule.responseHeaders && Object.keys(rule.responseHeaders).length)) modified = true;
+    await throttleBody(responseBody, settings.networkConditions?.downloadKbps || 0);
+    pauseAtBreakpoint("response", rules);
+    const finalResponse = modified ? new Response([204, 205, 304].includes(status) ? null : responseBody, { status, statusText: response.statusText, headers: responseHeaders }) : response;
     emit({ id: id(), frameUrl: location.href, transport: "fetch", method: request.method, url: request.url, startedAt, duration: Date.now() - startedAt, status, originalStatus, requestHeaders: headersToObject(request.headers), requestBody, responseHeaders: headersToObject(finalResponse.headers), responseBody, ruleIds: rules.map((rule) => rule.id) });
     return finalResponse;
   } catch (error) {
@@ -131,6 +224,9 @@ OriginalXHR.prototype.send = function(body) {
   meta.startedAt = Date.now();
   meta.requestBody = typeof body === "string" ? body : "";
   for (const rule of meta.rules) if (rule.requestBody) meta.requestBody = applyTemplate(rule.requestBody, meta.requestBody);
+  for (const rule of meta.rules) meta.requestBody = applyJsonEdits(meta.requestBody, rule.requestJsonEdits);
+  for (const rule of meta.rules) for (const [name, value] of Object.entries(rule.requestHeaders || {})) if (value) this.setRequestHeader(name, value);
+  pauseAtBreakpoint("request", meta.rules);
   return originalSend.call(this, meta.requestBody || body);
 };
 function parseRawHeaders(value) {

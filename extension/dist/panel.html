@@ -20,10 +20,20 @@
   <main>
     <div class="toolbar">
       <input id="search" placeholder="Search requests">
+      <select id="profile" title="Active profile"><option>All</option></select>
+      <select id="mode" title="Interception mode"><option value="page">Page mode</option><option value="full">Full mode</option></select>
       <span id="count">0 requests</span>
+      <button id="network">Network</button>
+      <button id="compare">Compare</button>
+      <button id="importRules">Import</button>
+      <button id="exportRules">Rules JSON</button>
+      <button id="exportHar">HAR</button>
       <button id="pause">Pause</button>
       <button id="clear">Clear</button>
+      <input id="ruleFile" type="file" accept="application/json,.json,.har" hidden>
     </div>
+    <div id="modeStatus" class="mode-status" hidden></div>
+    <div id="breakpoints" class="breakpoints" hidden></div>
     <div class="traffic-layout">
       <div id="trafficList" class="traffic-list"></div>
       <div id="detail" class="detail">
@@ -45,18 +55,53 @@
         <label>Delay (ms)<input id="ruleDelay" type="number" min="0"></label>
       </div>
       <label>URL pattern<input id="ruleUrl" placeholder="/api/users or ^https://api\."></label>
+      <div id="matchPreview" class="match-preview"></div>
+      <div class="form-grid">
+        <label>Folder<input id="ruleFolder" placeholder="Default"></label>
+        <label>Profiles<input id="ruleProfiles" placeholder="Development, QA"></label>
+      </div>
+      <label>Request headers<textarea id="requestHeaders" placeholder="Authorization: Bearer token&#10;X-Debug: true"></textarea></label>
       <label>Request body<textarea id="requestBody" placeholder="Use {{body}} to include the original body"></textarea></label>
+      <label>Request JSON edits<textarea id="requestJsonEdits" placeholder="$.user.name=&quot;Test User&quot;&#10;$.flags[0]=true"></textarea></label>
       <div class="form-grid">
         <label>Status code<input id="responseStatus" type="number" min="100" max="599" placeholder="Keep actual status"></label>
-        <label class="check"><input id="ruleError" type="checkbox"> Simulate network error</label>
+        <label>Response preset<select id="responsePreset"><option value="">Custom</option></select></label>
       </div>
+      <label>Response headers<textarea id="responseHeaders" placeholder="Content-Type: application/json&#10;X-Debug: modified"></textarea></label>
       <label>Response body<textarea id="responseBody" placeholder='{"users": []} or {{body}}'></textarea></label>
+      <label>Response JSON edits<textarea id="responseJsonEdits" placeholder="$.result.status=&quot;changed&quot;"></textarea></label>
+      <div class="checks">
+        <label class="check"><input id="ruleError" type="checkbox"> Simulate network error</label>
+        <label class="check"><input id="breakRequest" type="checkbox"> Break before request</label>
+        <label class="check"><input id="breakResponse" type="checkbox"> Break before response</label>
+      </div>
       <footer>
         <button id="deleteRule" class="danger" type="button">Delete</button>
         <span></span>
         <button id="cancelRule" type="button">Cancel</button>
         <button id="saveRule" class="primary" type="button">Save rule</button>
       </footer>
+    </form>
+  </dialog>
+  <dialog id="networkDialog">
+    <form method="dialog">
+      <header><strong>Network conditions</strong></header>
+      <label>Preset<select id="networkPreset"></select></label>
+      <div class="form-grid">
+        <label>Latency (ms)<input id="latency" type="number" min="0"></label>
+        <label>Failure rate (0–100%)<input id="failureRate" type="number" min="0" max="100"></label>
+        <label>Download (Kbps)<input id="downloadKbps" type="number" min="0"></label>
+        <label>Upload (Kbps)<input id="uploadKbps" type="number" min="0"></label>
+      </div>
+      <label class="check"><input id="offline" type="checkbox"> Offline</label>
+      <footer><span></span><span></span><button id="cancelNetwork" type="button">Cancel</button><button id="saveNetwork" class="primary" type="button">Apply</button></footer>
+    </form>
+  </dialog>
+  <dialog id="compareDialog" class="compare-dialog">
+    <form method="dialog">
+      <header><strong>Traffic comparison</strong></header>
+      <pre id="comparison"></pre>
+      <footer><span></span><span></span><button id="closeCompare" type="button">Close</button></footer>
     </form>
   </dialog>
   <script type="module" src="panel.js"></script>

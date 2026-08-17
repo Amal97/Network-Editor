@@ -1,6 +1,8 @@
 import { DEFAULT_SETTINGS, Settings, TrafficRecord } from './types';
+import { configureFullInterception, continueBreakpoint, getPendingBreakpoints, onCdpTraffic, syncFullMode } from './cdp';
 
 const trafficByTab = new Map<number, TrafficRecord[]>();
+onCdpTraffic(storeTraffic);
 
 chrome.runtime.onInstalled.addListener(async () => {
   const stored = await chrome.storage.local.get('settings');
@@ -10,11 +12,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'traffic' && sender.tab?.id !== undefined) {
     const record = { ...message.record, tabId: sender.tab.id } as TrafficRecord;
-    const traffic = trafficByTab.get(sender.tab.id) || [];
-    traffic.push(record);
-    if (traffic.length > 1000) traffic.shift();
-    trafficByTab.set(sender.tab.id, traffic);
-    chrome.runtime.sendMessage({ type: 'traffic', record }).catch(() => undefined);
+    storeTraffic(record);
     return;
   }
   if (message?.type === 'get-traffic') {
@@ -26,6 +24,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ ok: true });
     return true;
   }
+  if (message?.type === 'configure-full-mode') {
+    configureFullInterception(Number(message.tabId), Boolean(message.enabled)).then(sendResponse);
+    return true;
+  }
+  if (message?.type === 'get-breakpoints') {
+    sendResponse({ breakpoints: getPendingBreakpoints(Number(message.tabId)) });
+    return true;
+  }
+  if (message?.type === 'continue-breakpoint') {
+    continueBreakpoint(String(message.id)).then(() => sendResponse({ ok: true }));
+    return true;
+  }
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -33,10 +43,23 @@ chrome.storage.onChanged.addListener((changes, area) => {
     chrome.tabs.query({}).then((tabs) => {
       for (const tab of tabs) if (tab.id !== undefined) chrome.tabs.sendMessage(tab.id, { type: 'settings-changed' }).catch(() => undefined);
     });
+    for (const tabId of trafficByTab.keys()) syncFullMode(tabId).catch(() => undefined);
   }
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => trafficByTab.delete(tabId));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  trafficByTab.delete(tabId);
+  configureFullInterception(tabId, false).catch(() => undefined);
+});
+
+function storeTraffic(record: TrafficRecord): void {
+  if (record.tabId === undefined) return;
+  const traffic = trafficByTab.get(record.tabId) || [];
+  traffic.push(record);
+  if (traffic.length > 1000) traffic.shift();
+  trafficByTab.set(record.tabId, traffic);
+  chrome.runtime.sendMessage({ type: 'traffic', record }).catch(() => undefined);
+}
 
 export async function getSettings(): Promise<Settings> {
   const stored = await chrome.storage.local.get('settings');

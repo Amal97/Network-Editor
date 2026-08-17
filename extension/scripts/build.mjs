@@ -12,7 +12,8 @@ const options = {
     page: resolve(root, 'src/page.ts'),
     devtools: resolve(root, 'src/devtools.ts'),
     panel: resolve(root, 'src/panel.ts'),
-    popup: resolve(root, 'src/popup.ts')
+    popup: resolve(root, 'src/popup.ts'),
+    'rule-utils': resolve(root, 'src/rule-utils.ts')
   },
   bundle: true,
   format: 'esm',

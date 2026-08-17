@@ -1,6 +1,7 @@
 {
   "name": "network-modifier-extension",
   "version": "0.1.0",
+  "type": "module",
   "private": true,
   "description": "Chrome DevTools extension for monitoring and modifying frontend XHR/fetch traffic.",
   "scripts": {

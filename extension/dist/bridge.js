@@ -1,5 +1,18 @@
 // src/types.ts
-var DEFAULT_SETTINGS = { enabled: true, rules: [] };
+var DEFAULT_NETWORK_CONDITIONS = {
+  offline: false,
+  latencyMs: 0,
+  downloadKbps: 0,
+  uploadKbps: 0,
+  failureRate: 0
+};
+var DEFAULT_SETTINGS = {
+  enabled: true,
+  rules: [],
+  interceptionMode: "page",
+  activeProfiles: ["All"],
+  networkConditions: DEFAULT_NETWORK_CONDITIONS
+};
 
 // src/bridge.ts
 async function publishSettings() {

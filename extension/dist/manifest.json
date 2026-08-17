@@ -3,7 +3,7 @@
   "name": "Network Modifier",
   "version": "0.1.0",
   "description": "Monitor and modify frontend XHR and Fetch requests without a proxy or certificate.",
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage", "tabs", "debugger", "downloads"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "Network Modifier" },

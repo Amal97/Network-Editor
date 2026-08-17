@@ -21,15 +21,15 @@ test('build emits a complete loadable extension package', () => {
   ];
   for (const file of referencedFiles) assert.ok(existsSync(resolve(dist, file)), `Missing dist/${file}`);
 
-  for (const script of ['page.js', 'bridge.js', 'background.js', 'panel.js', 'popup.js', 'devtools.js']) {
+  for (const script of ['page.js', 'bridge.js', 'background.js', 'panel.js', 'popup.js', 'devtools.js', 'rule-utils.js']) {
     const source = readFileSync(resolve(dist, script), 'utf8');
     assert.doesNotMatch(source, /^\s*import\s/m, `${script} contains an unbundled import`);
   }
 });
 
-test('manifest limits interception to HTTP pages and avoids debugger permission', () => {
+test('manifest limits interception to HTTP pages and declares optional full interception support', () => {
   const manifest = JSON.parse(readFileSync(resolve(dist, 'manifest.json'), 'utf8'));
   assert.deepEqual(manifest.host_permissions, ['http://*/*', 'https://*/*']);
-  assert.ok(!manifest.permissions.includes('debugger'));
+  assert.ok(manifest.permissions.includes('debugger'));
   assert.ok(manifest.content_scripts.some((script) => script.world === 'MAIN' && script.run_at === 'document_start'));
 });
