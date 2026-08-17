@@ -32,6 +32,17 @@ const MAIL_SERVICE_DOMAINS = [
   'icloud.com', 'me.com'
 ];
 
+// Teams-style clients pin certificates and reject MITM on their send/signalling APIs,
+// which shows up as "messages arrive but will not send".
+const REALTIME_APP_DOMAINS = [
+  'teams.microsoft.com', 'teams.live.com', 'teams.cloud.microsoft',
+  'skype.com', 'skypeassets.com', 'sfbassets.com', 'lync.com',
+  'trouter.communication.microsoft.com', 'communication.azure.com',
+  'slack.com', 'slack-edge.com', 'slack-msgs.com',
+  'discord.com', 'discordapp.com',
+  'zoom.us', 'whatsapp.com', 'whatsapp.net', 'web.whatsapp.com'
+];
+
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 128 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 128 });
 
@@ -124,7 +135,8 @@ class ProxyServer extends EventEmitter {
 
     if (!this.settings.interceptHttps ||
         this.isBypassed(`${host}:${port}`) ||
-        (this.settings.protectEmailTraffic && isLikelyEmailTraffic(host, port))) {
+        (this.settings.protectEmailTraffic && isLikelyEmailTraffic(host, port)) ||
+        (this.settings.protectRealtimeApps && isLikelyRealtimeAppTraffic(host))) {
       return this.tunnel(socket, head, host, port);
     }
 
@@ -906,13 +918,23 @@ function detectClientSource(headers) {
   return hasFetchMetadata || hasBrowserUserAgent ? 'browser' : 'other';
 }
 
-function isLikelyEmailTraffic(host, port) {
-  if (MAIL_PORTS.has(Number(port))) return true;
-  const normalizedHost = String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
-  if (MAIL_HOST_PREFIXES.some((prefix) => normalizedHost.startsWith(prefix))) return true;
-  return MAIL_SERVICE_DOMAINS.some((domain) =>
-    normalizedHost === domain || normalizedHost.endsWith(`.${domain}`)
-  );
+function normalizeHost(host) {
+  return String(host || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
 }
 
-module.exports = { ProxyServer, isLikelyEmailTraffic };
+function matchesDomain(host, domains) {
+  return domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
+function isLikelyEmailTraffic(host, port) {
+  if (MAIL_PORTS.has(Number(port))) return true;
+  const normalizedHost = normalizeHost(host);
+  if (MAIL_HOST_PREFIXES.some((prefix) => normalizedHost.startsWith(prefix))) return true;
+  return matchesDomain(normalizedHost, MAIL_SERVICE_DOMAINS);
+}
+
+function isLikelyRealtimeAppTraffic(host) {
+  return matchesDomain(normalizeHost(host), REALTIME_APP_DOMAINS);
+}
+
+module.exports = { ProxyServer, isLikelyEmailTraffic, isLikelyRealtimeAppTraffic };

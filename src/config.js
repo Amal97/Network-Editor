@@ -12,6 +12,7 @@ const DEFAULT_SETTINGS = {
   recording: true,
   interceptHttps: true,
   protectEmailTraffic: true,
+  protectRealtimeApps: true,
   maxFlows: 2000,
   maxBodySize: 10 * 1024 * 1024,
   decodeContentEncoding: true,

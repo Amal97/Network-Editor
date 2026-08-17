@@ -2578,6 +2578,7 @@ function renderSettings() {
     h('div', { class: 'card' },
       toggle('interceptHttps', 'Intercept HTTPS (MITM)', 'When off, TLS connections are tunnelled without decryption.'),
       toggle('protectEmailTraffic', 'Protect email traffic from HTTPS interception', 'Tunnels mail ports and common mail or sign-in hosts unchanged. Disable only when you intentionally need to inspect them.'),
+      toggle('protectRealtimeApps', 'Protect chat and meeting apps from HTTPS interception', 'Tunnels Teams, Slack, Discord, Zoom and WhatsApp unchanged. These pin certificates and stop sending messages when intercepted.'),
       toggle('decodeContentEncoding', 'Decode gzip/deflate/brotli responses', 'Needed to read and edit compressed bodies.'),
       toggle('enableHttp2Upstream', 'Use HTTP/2 upstream when available', 'Negotiates HTTP/2 for direct HTTPS requests and falls back to HTTP/1.1.'),
       toggle('rejectUnauthorized', 'Verify upstream TLS certificates', 'Turn on to refuse invalid upstream certificates.'),
