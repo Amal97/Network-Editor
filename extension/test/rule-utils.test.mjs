@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  applyCorsDefaults,
   applyJsonEdits,
   diagnoseRules,
   exportRules,
@@ -9,6 +10,7 @@ import {
   matchRules,
   parseHeaderInput,
   parseJsonEdits,
+  prepareFulfilledHeaders,
   trafficToHar
 } from '../dist/rule-utils.js';
 
@@ -28,6 +30,25 @@ test('parses headers and applies nested JSON edits', () => {
   assert.deepEqual(parseHeaderInput('X-Test: yes\nAuthorization: Bearer value'), { 'X-Test': 'yes', Authorization: 'Bearer value' });
   const edits = parseJsonEdits('$.user.name="Changed"\n$.items[0].active=true');
   assert.deepEqual(JSON.parse(applyJsonEdits('{"user":{"name":"Original"},"items":[{"active":false}]}', edits)), { user: { name: 'Changed' }, items: [{ active: true }] });
+});
+
+test('prepares decoded replacement bodies for CDP fulfillment', () => {
+  const headers = prepareFulfilledHeaders(new Headers({ 'content-encoding': 'gzip', etag: 'old', 'content-type': 'application/json' }), '{"changed":true}');
+  assert.equal(headers.get('content-encoding'), null);
+  assert.equal(headers.get('etag'), null);
+  assert.equal(headers.get('content-length'), String(new TextEncoder().encode('{"changed":true}').byteLength));
+  assert.equal(headers.get('x-network-modifier'), 'modified');
+});
+
+test('adds credential-safe CORS defaults for synthetic responses', () => {
+  const request = new Headers({ origin: 'https://app.example', 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization, content-type', 'access-control-request-private-network': 'true' });
+  const headers = applyCorsDefaults(new Headers({ 'content-type': 'application/json' }), request, 'POST');
+  assert.equal(headers.get('access-control-allow-origin'), 'https://app.example');
+  assert.equal(headers.get('access-control-allow-credentials'), 'true');
+  assert.equal(headers.get('access-control-allow-methods'), 'POST');
+  assert.equal(headers.get('access-control-allow-headers'), 'authorization, content-type');
+  assert.equal(headers.get('access-control-allow-private-network'), 'true');
+  assert.equal(headers.get('vary'), 'Origin');
 });
 
 test('round trips native exports and diagnoses duplicate matchers', () => {

@@ -16,10 +16,21 @@ var DEFAULT_SETTINGS = {
 
 // src/bridge.ts
 async function publishSettings() {
-  const stored = await chrome.storage.local.get("settings");
-  const settings = { ...DEFAULT_SETTINGS, ...stored.settings || {} };
-  const message = { source: "network-modifier-extension", type: "config", settings };
-  window.postMessage(message, "*");
+  try {
+    if (!chrome.runtime?.id) return;
+    const stored = await chrome.storage.local.get("settings");
+    const settings = { ...DEFAULT_SETTINGS, ...stored.settings || {} };
+    const message = { source: "network-modifier-extension", type: "config", settings };
+    window.postMessage(message, "*");
+  } catch {
+  }
+}
+function sendRuntimeMessage(message) {
+  try {
+    if (!chrome.runtime?.id) return;
+    chrome.runtime.sendMessage(message).catch(() => void 0);
+  } catch {
+  }
 }
 window.addEventListener("message", (event) => {
   if (event.source !== window || event.data?.source !== "network-modifier-page") return;
@@ -28,10 +39,13 @@ window.addEventListener("message", (event) => {
     return;
   }
   if (event.data.type !== "traffic" || !("record" in event.data)) return;
-  chrome.runtime.sendMessage({ type: "traffic", record: event.data.record }).catch(() => void 0);
+  sendRuntimeMessage({ type: "traffic", record: event.data.record });
 });
-chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === "settings-changed") publishSettings();
-});
-publishSettings();
+try {
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === "settings-changed") publishSettings();
+  });
+} catch {
+}
+publishSettings().catch(() => void 0);
 //# sourceMappingURL=bridge.js.map

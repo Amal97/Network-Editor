@@ -37,6 +37,31 @@ function applyHeaders(headers, changes) {
   }
   return output;
 }
+function prepareFulfilledHeaders(headers, body) {
+  const output = new Headers(headers);
+  for (const name of ["content-encoding", "content-length", "transfer-encoding", "etag", "content-md5"]) output.delete(name);
+  output.set("content-length", String(new TextEncoder().encode(body).byteLength));
+  output.set("x-network-modifier", "modified");
+  return output;
+}
+function applyCorsDefaults(responseHeaders, requestHeaders, method) {
+  const output = new Headers(responseHeaders);
+  const origin = requestHeaders.get("origin");
+  if (!origin) return output;
+  if (!output.has("access-control-allow-origin")) output.set("access-control-allow-origin", origin);
+  if (!output.has("access-control-allow-credentials")) output.set("access-control-allow-credentials", "true");
+  const requestedMethod = requestHeaders.get("access-control-request-method");
+  if (!output.has("access-control-allow-methods")) output.set("access-control-allow-methods", requestedMethod || method);
+  const requestedHeaders = requestHeaders.get("access-control-request-headers");
+  if (requestedHeaders && !output.has("access-control-allow-headers")) output.set("access-control-allow-headers", requestedHeaders);
+  if (requestHeaders.get("access-control-request-private-network") === "true" && !output.has("access-control-allow-private-network")) {
+    output.set("access-control-allow-private-network", "true");
+  }
+  const vary = output.get("vary");
+  if (!vary) output.set("vary", "Origin");
+  else if (!vary.split(",").some((value) => value.trim().toLowerCase() === "origin")) output.set("vary", `${vary}, Origin`);
+  return output;
+}
 function parseHeaderInput(value) {
   const output = {};
   for (const line of value.split(/\r?\n/)) {
@@ -204,6 +229,7 @@ function escapeRegExp(value) {
 export {
   NETWORK_PRESETS,
   RESPONSE_PRESETS,
+  applyCorsDefaults,
   applyHeaders,
   applyJsonEdits,
   diagnoseRules,
@@ -215,6 +241,7 @@ export {
   matchRules,
   parseHeaderInput,
   parseJsonEdits,
+  prepareFulfilledHeaders,
   trafficToHar,
   urlMatches
 };

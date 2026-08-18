@@ -9,17 +9,38 @@ const comparisonIds = new Set<string>();
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
+async function runtimeMessage<T = Record<string, unknown>>(message: unknown): Promise<T | undefined> {
+  try {
+    if (!chrome.runtime?.id) return undefined;
+    return await chrome.runtime.sendMessage(message) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+function showConnectionError(): void {
+  const status = byId('modeStatus');
+  status.hidden = false;
+  status.textContent = 'Extension context changed. Close DevTools, reload this page, then reopen DevTools.';
+}
+
 async function initialize() {
-  const stored = await chrome.storage.local.get('settings');
-  settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
-  traffic = (await chrome.runtime.sendMessage({ type: 'get-traffic', tabId })).traffic || [];
-  wire();
-  render();
+  try {
+    const stored = await chrome.storage.local.get('settings');
+    settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
+    traffic = (await runtimeMessage<{ traffic?: TrafficRecord[] }>({ type: 'get-traffic', tabId }))?.traffic || [];
+    wire();
+    render();
+  } catch {
+    wire();
+    render();
+    showConnectionError();
+  }
 }
 
 function wire() {
   byId<HTMLButtonElement>('clear').onclick = async () => {
-    await chrome.runtime.sendMessage({ type: 'clear-traffic', tabId });
+    await runtimeMessage({ type: 'clear-traffic', tabId });
     traffic = [];
     selectedId = '';
     renderTraffic();
@@ -53,6 +74,7 @@ function wire() {
 function render() {
   byId<HTMLButtonElement>('pause').textContent = settings.enabled ? 'Pause' : 'Resume';
   byId<HTMLSelectElement>('mode').value = settings.interceptionMode || 'page';
+  renderModeStatus();
   renderProfiles();
   renderTraffic();
   renderRules();
@@ -87,8 +109,21 @@ function renderDetail(record: TrafficRecord) {
   const statusText = record.originalStatus !== undefined && record.originalStatus !== record.status
     ? `Server ${record.originalStatus} → page sees ${record.status}`
     : `Status ${record.status || record.error || ''}`;
-  detail.innerHTML = `<div class="detail-head"><div><strong>${escapeHtml(record.method)} ${escapeHtml(record.url)}</strong><span>${escapeHtml(statusText)} · ${record.duration}ms</span></div><button id="createFromRequest" class="primary">Create rule</button></div>${record.ruleIds.length ? '<div class="modified-note">Modified responses are visible to page JavaScript. Chrome Network shows the original server exchange.</div>' : ''}${section('Request', record.requestHeaders, record.requestBody)}${section('Page-visible response', record.responseHeaders, record.responseBody)}${record.ruleIds.length ? `<p class="applied">Rules applied: ${record.ruleIds.length}</p>` : ''}`;
+  const modeNote = settings.interceptionMode === 'full'
+    ? 'Full mode modified this request at the Chrome network response stage.'
+    : 'Page mode modifications are visible to page JavaScript; Chrome Network shows the server exchange.';
+  detail.innerHTML = `<div class="detail-head"><div><strong>${escapeHtml(record.method)} ${escapeHtml(record.url)}</strong><span>${escapeHtml(statusText)} · ${record.duration}ms</span></div><div><button id="copyResponse">Copy response</button><button id="createFromRequest" class="primary">Create rule</button></div></div>${record.ruleIds.length ? `<div class="modified-note">${escapeHtml(modeNote)}</div>` : ''}${section('Request', record.requestHeaders, record.requestBody)}${section('Modified response', record.responseHeaders, record.responseBody)}${record.ruleIds.length ? `<p class="applied">Rules applied: ${record.ruleIds.length}</p>` : ''}`;
   byId<HTMLButtonElement>('createFromRequest').onclick = () => editRule(ruleFromTraffic(record));
+  byId<HTMLButtonElement>('copyResponse').onclick = async (event) => {
+    await navigator.clipboard.writeText(record.responseBody);
+    (event.currentTarget as HTMLButtonElement).textContent = 'Copied';
+  };
+}
+
+function renderModeStatus(): void {
+  const status = byId('modeStatus');
+  status.hidden = true;
+  status.textContent = '';
 }
 
 function section(title: string, headers: Record<string, string>, body: string) {
@@ -176,14 +211,15 @@ function editRule(rule: Rule) {
 async function saveSettings() {
   await chrome.storage.local.set({ settings });
   await chrome.tabs.sendMessage(tabId, { type: 'settings-changed' }).catch(() => undefined);
-  if (settings.interceptionMode === 'full') await chrome.runtime.sendMessage({ type: 'configure-full-mode', tabId, enabled: settings.enabled });
+  if (settings.interceptionMode === 'full') await runtimeMessage({ type: 'configure-full-mode', tabId, enabled: settings.enabled });
   render();
 }
 
 async function changeMode(event: Event) {
   const mode = (event.target as HTMLSelectElement).value as 'page' | 'full';
-  const result = await chrome.runtime.sendMessage({ type: 'configure-full-mode', tabId, enabled: mode === 'full' });
+  const result = await runtimeMessage<{ ok: boolean; error?: string }>({ type: 'configure-full-mode', tabId, enabled: mode === 'full' });
   const status = byId('modeStatus');
+  if (!result) { showConnectionError(); return; }
   status.hidden = result.ok;
   status.textContent = result.error || '';
   if (!result.ok) {
@@ -221,12 +257,12 @@ function populatePresets() {
 
 async function renderBreakpoints() {
   const container = byId('breakpoints');
-  const response = await chrome.runtime.sendMessage({ type: 'get-breakpoints', tabId });
-  const breakpoints = response.breakpoints || [];
+  const response = await runtimeMessage<{ breakpoints?: Array<{ id: string; stage: string; method: string; url: string }> }>({ type: 'get-breakpoints', tabId });
+  const breakpoints = response?.breakpoints || [];
   container.hidden = !breakpoints.length;
   container.innerHTML = breakpoints.map((item: { id: string; stage: string; method: string; url: string }) => `<span>Paused ${escapeHtml(item.stage)}: ${escapeHtml(item.method)} ${escapeHtml(shortUrl(item.url))}</span><button data-id="${escapeHtml(item.id)}">Continue</button>`).join('');
   container.querySelectorAll<HTMLButtonElement>('button').forEach((button) => button.onclick = async () => {
-    await chrome.runtime.sendMessage({ type: 'continue-breakpoint', id: button.dataset.id });
+    await runtimeMessage({ type: 'continue-breakpoint', id: button.dataset.id });
     renderBreakpoints();
   });
 }
@@ -302,4 +338,4 @@ function escapeRegExp(value: string) { return value.replace(/[.*+?^${}()|[\]\\]/
 
 function shortUrl(value: string) { try { const url = new URL(value); return `${url.host}${url.pathname}${url.search}`; } catch { return value; } }
 function escapeHtml(value: unknown) { return String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]!); }
-initialize();
+initialize().catch(showConnectionError);

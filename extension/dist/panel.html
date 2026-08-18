@@ -68,7 +68,7 @@
         <label>Response preset<select id="responsePreset"><option value="">Custom</option></select></label>
       </div>
       <label>Response headers<textarea id="responseHeaders" placeholder="Content-Type: application/json&#10;X-Debug: modified"></textarea></label>
-      <label>Response body<textarea id="responseBody" placeholder='{"users": []} or {{body}}'></textarea></label>
+      <label>Response body <small>Blank keeps the server body</small><textarea id="responseBody" placeholder='Enter replacement data, or use {{body}} to include the server body'></textarea></label>
       <label>Response JSON edits<textarea id="responseJsonEdits" placeholder="$.result.status=&quot;changed&quot;"></textarea></label>
       <div class="checks">
         <label class="check"><input id="ruleError" type="checkbox"> Simulate network error</label>

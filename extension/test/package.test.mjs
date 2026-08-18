@@ -33,3 +33,30 @@ test('manifest limits interception to HTTP pages and declares optional full inte
   assert.ok(manifest.permissions.includes('debugger'));
   assert.ok(manifest.content_scripts.some((script) => script.world === 'MAIN' && script.run_at === 'document_start'));
 });
+
+test('full mode replaces bodies at the response stage with retrievable metadata', () => {
+  const background = readFileSync(resolve(dist, 'background.js'), 'utf8');
+  assert.match(background, /Network\.setCacheDisabled/);
+  assert.match(background, /Network\.setBypassServiceWorker/);
+  assert.match(background, /Fetch\.fulfillRequest/);
+  assert.match(background, /x-network-modifier/);
+  assert.match(background, /maxResourceBufferSize/);
+  assert.match(background, /enableDurableMessages: true/);
+  assert.match(background, /responsePhrase/);
+  assert.match(background, /needsOriginalBody/);
+  assert.match(background, /requestHeadersById/);
+  assert.doesNotMatch(background, /canFulfillAtRequestStage/);
+  assert.match(background, /event\.request\.method === "OPTIONS" && rules\.length/);
+  assert.match(background, /responseCode: 204/);
+  assert.match(background, /http:\/\/\*\/\*/);
+  assert.match(background, /https:\/\/\*\/\*/);
+  assert.doesNotMatch(background, /urlPattern:\s*"\*"/);
+});
+
+test('panel describes response-stage modification and offers response copying', () => {
+  const panel = readFileSync(resolve(dist, 'panel.js'), 'utf8');
+  assert.match(panel, /Copy response/);
+  assert.match(panel, /Chrome network response stage/);
+  assert.doesNotMatch(panel, /Override content/);
+  assert.match(panel, /navigator\.clipboard\.writeText/);
+});

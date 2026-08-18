@@ -5,7 +5,7 @@ A standalone Manifest V3 Chrome extension for monitoring and modifying frontend 
 ## Current capabilities
 
 - Capture Fetch and XMLHttpRequest traffic from inspected tabs
-- Optional **Full mode** uses Chrome DevTools Protocol so modifications appear in Chrome's Network tab
+- Optional **Full mode** uses Chrome DevTools Protocol so the page receives wire-level response replacements
 - Inspect request/response bodies, status, headers, timing, matched rules, and original versus modified status
 - Match rules by HTTP method and URL text or regular expression
 - Replace request and response bodies (`{{body}}` inserts the previous body)
@@ -34,10 +34,12 @@ npm run build
 4. Open DevTools on a page and choose **Network Modifier**.
 5. Reload the page so interception starts at `document_start`.
 
-Use **Page mode** for lightweight Fetch/XHR modification. Use **Full mode** when the modified request or response must appear in Chrome's Network tab. Chrome displays an automation/debugging banner while Full mode is attached, and another debugger cannot attach to the same tab concurrently.
+Use **Page mode** for lightweight Fetch/XHR modification. Use **Full mode** when the page must consume a wire-level replacement. Chrome displays an automation/debugging banner while Full mode is attached.
+
+Response replacement rules wait for the upstream response headers and then fulfill the paused response, matching the response-mutation architecture used by Netify. Static replacement bodies skip downloading the original body; `{{body}}` templates and JSON edits retrieve it first. **Copy response** remains available for transferring a captured body elsewhere.
 
 Use `npm run watch` while developing, then click Reload on the extension card after changes.
 
 ## Scope and limitations
 
-Page mode targets page-originated XHR and Fetch calls; static resources and service-worker-owned requests are outside its scope. Full mode intercepts tab traffic through CDP and can modify the wire-visible request/response, but requires Chrome's `debugger` permission and a per-tab attachment. Page-mode breakpoints use JavaScript's debugger pause; interactive continue controls are available in Full mode.
+Page mode targets page-originated XHR and Fetch calls; static resources and service-worker-owned requests are outside its scope. Full mode intercepts tab traffic through CDP and can modify what the page receives, but requires Chrome's `debugger` permission and a per-tab attachment. Page-mode breakpoints use JavaScript's debugger pause; interactive continue controls are available in Full mode.

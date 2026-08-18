@@ -49,6 +49,33 @@ export function applyHeaders(headers: Headers, changes: HeaderMap | undefined): 
   return output;
 }
 
+export function prepareFulfilledHeaders(headers: Headers, body: string): Headers {
+  const output = new Headers(headers);
+  for (const name of ['content-encoding', 'content-length', 'transfer-encoding', 'etag', 'content-md5']) output.delete(name);
+  output.set('content-length', String(new TextEncoder().encode(body).byteLength));
+  output.set('x-network-modifier', 'modified');
+  return output;
+}
+
+export function applyCorsDefaults(responseHeaders: Headers, requestHeaders: Headers, method: string): Headers {
+  const output = new Headers(responseHeaders);
+  const origin = requestHeaders.get('origin');
+  if (!origin) return output;
+  if (!output.has('access-control-allow-origin')) output.set('access-control-allow-origin', origin);
+  if (!output.has('access-control-allow-credentials')) output.set('access-control-allow-credentials', 'true');
+  const requestedMethod = requestHeaders.get('access-control-request-method');
+  if (!output.has('access-control-allow-methods')) output.set('access-control-allow-methods', requestedMethod || method);
+  const requestedHeaders = requestHeaders.get('access-control-request-headers');
+  if (requestedHeaders && !output.has('access-control-allow-headers')) output.set('access-control-allow-headers', requestedHeaders);
+  if (requestHeaders.get('access-control-request-private-network') === 'true' && !output.has('access-control-allow-private-network')) {
+    output.set('access-control-allow-private-network', 'true');
+  }
+  const vary = output.get('vary');
+  if (!vary) output.set('vary', 'Origin');
+  else if (!vary.split(',').some((value) => value.trim().toLowerCase() === 'origin')) output.set('vary', `${vary}, Origin`);
+  return output;
+}
+
 export function parseHeaderInput(value: string): HeaderMap {
   const output: HeaderMap = {};
   for (const line of value.split(/\r?\n/)) {

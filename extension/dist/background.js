@@ -40,6 +40,31 @@ function applyHeaders(headers, changes) {
   }
   return output;
 }
+function prepareFulfilledHeaders(headers, body) {
+  const output = new Headers(headers);
+  for (const name of ["content-encoding", "content-length", "transfer-encoding", "etag", "content-md5"]) output.delete(name);
+  output.set("content-length", String(new TextEncoder().encode(body).byteLength));
+  output.set("x-network-modifier", "modified");
+  return output;
+}
+function applyCorsDefaults(responseHeaders, requestHeaders, method) {
+  const output = new Headers(responseHeaders);
+  const origin = requestHeaders.get("origin");
+  if (!origin) return output;
+  if (!output.has("access-control-allow-origin")) output.set("access-control-allow-origin", origin);
+  if (!output.has("access-control-allow-credentials")) output.set("access-control-allow-credentials", "true");
+  const requestedMethod = requestHeaders.get("access-control-request-method");
+  if (!output.has("access-control-allow-methods")) output.set("access-control-allow-methods", requestedMethod || method);
+  const requestedHeaders = requestHeaders.get("access-control-request-headers");
+  if (requestedHeaders && !output.has("access-control-allow-headers")) output.set("access-control-allow-headers", requestedHeaders);
+  if (requestHeaders.get("access-control-request-private-network") === "true" && !output.has("access-control-allow-private-network")) {
+    output.set("access-control-allow-private-network", "true");
+  }
+  const vary = output.get("vary");
+  if (!vary) output.set("vary", "Origin");
+  else if (!vary.split(",").some((value) => value.trim().toLowerCase() === "origin")) output.set("vary", `${vary}, Origin`);
+  return output;
+}
 function applyJsonEdits(body, edits) {
   if (!edits?.length) return body;
   const document = JSON.parse(body);
@@ -73,6 +98,7 @@ var protocolVersion = "1.3";
 var attachedTabs = /* @__PURE__ */ new Set();
 var requestStarts = /* @__PURE__ */ new Map();
 var requestBodies = /* @__PURE__ */ new Map();
+var requestHeadersById = /* @__PURE__ */ new Map();
 var pending = /* @__PURE__ */ new Map();
 var trafficHandler = () => void 0;
 function onCdpTraffic(handler) {
@@ -89,8 +115,22 @@ async function configureFullInterception(tabId, enabled) {
       await chrome.debugger.attach({ tabId }, protocolVersion);
       attachedTabs.add(tabId);
     }
-    await send(tabId, "Network.enable");
-    await send(tabId, "Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }, { urlPattern: "*", requestStage: "Response" }] });
+    await send(tabId, "Network.enable", {
+      maxTotalBufferSize: 50 * 1024 * 1024,
+      maxResourceBufferSize: 10 * 1024 * 1024,
+      maxPostDataSize: 10 * 1024 * 1024,
+      enableDurableMessages: true
+    });
+    await send(tabId, "Network.setCacheDisabled", { cacheDisabled: true });
+    await send(tabId, "Network.setBypassServiceWorker", { bypass: true });
+    await send(tabId, "Fetch.enable", {
+      patterns: [
+        { urlPattern: "http://*/*", requestStage: "Request" },
+        { urlPattern: "https://*/*", requestStage: "Request" },
+        { urlPattern: "http://*/*", requestStage: "Response" },
+        { urlPattern: "https://*/*", requestStage: "Response" }
+      ]
+    });
     await applyNetworkConditions(tabId);
     return { ok: true };
   } catch (error) {
@@ -123,15 +163,23 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
   if (method !== "Fetch.requestPaused" || source.tabId === void 0) return;
   handlePausedRequest(source.tabId, params).catch(() => {
     const event = params;
-    send(source.tabId, "Fetch.continueRequest", { requestId: event.requestId }).catch(() => void 0);
+    const continueMethod = event.responseStatusCode === void 0 ? "Fetch.continueRequest" : "Fetch.continueResponse";
+    send(source.tabId, continueMethod, { requestId: event.requestId }).catch(() => void 0);
   });
 });
 chrome.debugger.onDetach.addListener((source) => {
   if (source.tabId !== void 0) attachedTabs.delete(source.tabId);
 });
 async function handlePausedRequest(tabId, event) {
+  if (!isHttpUrl(event.request.url)) {
+    const continueMethod = event.responseStatusCode === void 0 ? "Fetch.continueRequest" : "Fetch.continueResponse";
+    await send(tabId, continueMethod, { requestId: event.requestId });
+    return;
+  }
   const settings = await getSettings();
-  const rules = matchRules(settings, event.request.url, event.request.method);
+  const requestHeaders = new Headers(event.request.headers);
+  const intendedMethod = event.request.method === "OPTIONS" ? requestHeaders.get("access-control-request-method") || "OPTIONS" : event.request.method;
+  const rules = matchRules(settings, event.request.url, intendedMethod);
   const stage = event.responseStatusCode === void 0 ? "request" : "response";
   if (rules.some((rule) => stage === "request" ? rule.breakOnRequest : rule.breakOnResponse)) {
     pending.set(event.requestId, { tabId, stage, params: { tabId }, event, rules });
@@ -142,9 +190,24 @@ async function handlePausedRequest(tabId, event) {
 }
 async function processPausedRequest(tabId, event, rules, resumed) {
   if (event.responseStatusCode === void 0) {
+    if (event.request.method === "OPTIONS" && rules.length) {
+      const requestHeaders2 = new Headers(event.request.headers);
+      const intendedMethod2 = requestHeaders2.get("access-control-request-method") || "OPTIONS";
+      const headers3 = prepareFulfilledHeaders(applyCorsDefaults(new Headers(), requestHeaders2, intendedMethod2), "");
+      await send(tabId, "Fetch.fulfillRequest", {
+        requestId: event.requestId,
+        responseCode: 204,
+        responsePhrase: responsePhrase(204),
+        responseHeaders: headerEntries(headers3),
+        body: ""
+      });
+      return;
+    }
     requestStarts.set(event.requestId, Date.now());
+    requestHeadersById.set(event.requestId, event.request.headers);
     let postData = event.request.postData || "";
     let headers2 = new Headers(event.request.headers);
+    const intendedMethod = event.request.method === "OPTIONS" ? headers2.get("access-control-request-method") || "OPTIONS" : event.request.method;
     for (const rule of rules) {
       if (rule.requestBody) postData = template(rule.requestBody, postData);
       postData = applyJsonEdits(postData, rule.requestJsonEdits);
@@ -165,11 +228,16 @@ async function processPausedRequest(tabId, event, rules, resumed) {
     });
     return;
   }
-  const response = await send(tabId, "Fetch.getResponseBody", { requestId: event.requestId });
-  const originalBody = response.base64Encoded ? fromBase64(response.body) : response.body;
+  const needsOriginalBody = rules.some((rule) => rule.responseBody.includes("{{body}}") || Boolean(rule.responseJsonEdits?.length)) || !rules.some((rule) => rule.responseBody);
+  let originalBody = "";
+  if (needsOriginalBody) {
+    const response = await send(tabId, "Fetch.getResponseBody", { requestId: event.requestId });
+    originalBody = response.base64Encoded ? fromBase64(response.body) : response.body;
+  }
   let body = originalBody;
   let status = event.responseStatusCode;
   let headers = new Headers(Object.fromEntries((event.responseHeaders || []).map(({ name, value }) => [name, value])));
+  const requestHeaders = new Headers(requestHeadersById.get(event.requestId) || event.request.headers);
   let modified = false;
   for (const rule of rules) {
     if (rule.responseBody) {
@@ -190,8 +258,8 @@ async function processPausedRequest(tabId, event, rules, resumed) {
     }
   }
   if (modified) {
-    headers.delete("content-length");
-    await send(tabId, "Fetch.fulfillRequest", { requestId: event.requestId, responseCode: status, responseHeaders: headerEntries(headers), body: toBase64(body) });
+    headers = prepareFulfilledHeaders(applyCorsDefaults(headers, requestHeaders, event.request.method), body);
+    await send(tabId, "Fetch.fulfillRequest", { requestId: event.requestId, responseCode: status, responsePhrase: responsePhrase(status), responseHeaders: headerEntries(headers), body: toBase64(body) });
   } else {
     await send(tabId, "Fetch.continueResponse", { requestId: event.requestId });
   }
@@ -213,8 +281,7 @@ async function processPausedRequest(tabId, event, rules, resumed) {
     ruleIds: rules.map((rule) => rule.id),
     matchedRuleNames: rules.map((rule) => rule.name)
   };
-  requestStarts.delete(event.requestId);
-  requestBodies.delete(event.requestId);
+  clearRequestState(event.requestId);
   trafficHandler(record);
 }
 async function applyNetworkConditions(tabId) {
@@ -240,6 +307,11 @@ function headerEntries(headers) {
 function template(value, body) {
   return value.replaceAll("{{body}}", body);
 }
+function clearRequestState(requestId) {
+  requestStarts.delete(requestId);
+  requestBodies.delete(requestId);
+  requestHeadersById.delete(requestId);
+}
 function toBase64(value) {
   const bytes = new TextEncoder().encode(value);
   let binary = "";
@@ -252,6 +324,27 @@ function fromBase64(value) {
 }
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function isHttpUrl(value) {
+  return value.startsWith("http://") || value.startsWith("https://");
+}
+function responsePhrase(status) {
+  return (/* @__PURE__ */ new Map([
+    [200, "OK"],
+    [201, "Created"],
+    [202, "Accepted"],
+    [204, "No Content"],
+    [400, "Bad Request"],
+    [401, "Unauthorized"],
+    [403, "Forbidden"],
+    [404, "Not Found"],
+    [409, "Conflict"],
+    [422, "Unprocessable Content"],
+    [429, "Too Many Requests"],
+    [500, "Internal Server Error"],
+    [502, "Bad Gateway"],
+    [503, "Service Unavailable"]
+  ])).get(status) || "Network Modifier";
 }
 function send(tabId, method, params) {
   return chrome.debugger.sendCommand({ tabId }, method, params);
