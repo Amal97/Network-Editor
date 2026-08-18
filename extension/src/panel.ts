@@ -1,6 +1,6 @@
 import { DEFAULT_NETWORK_CONDITIONS, DEFAULT_SETTINGS, Rule, Settings, TrafficRecord } from './types';
 import { diagnoseRules, exportRules, formatHeaders, formatJsonEdits, importRules, lineDiff, NETWORK_PRESETS, parseHeaderInput, parseJsonEdits, RESPONSE_PRESETS, trafficToHar, urlMatches } from './rule-utils';
-import { Activity, createIcons, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } from 'lucide';
+import { Activity, Braces, createIcons, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } from 'lucide';
 
 const tabId = chrome.devtools.inspectedWindow.tabId;
 let settings: Settings = DEFAULT_SETTINGS;
@@ -103,7 +103,7 @@ function render() {
   renderTraffic();
   renderRules();
   renderBreakpoints();
-  createIcons({ icons: { Activity, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } });
+  createIcons({ icons: { Activity, Braces, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } });
 }
 
 function renderTraffic() {
@@ -201,6 +201,10 @@ function editRule(rule: Rule) {
   populatePresets();
   updateMatchPreview();
   byId<HTMLInputElement>('ruleUrl').oninput = updateMatchPreview;
+  byId<HTMLButtonElement>('formatRequestBody').onclick = () => formatJsonBody('requestBody');
+  byId<HTMLButtonElement>('formatResponseBody').onclick = () => formatJsonBody('responseBody');
+  clearBodyFormatError('requestBody');
+  clearBodyFormatError('responseBody');
   byId<HTMLButtonElement>('deleteRule').hidden = !settings.rules.some((item) => item.id === rule.id);
   byId<HTMLButtonElement>('saveRule').onclick = async () => {
     try {
@@ -231,6 +235,25 @@ function editRule(rule: Rule) {
   byId<HTMLButtonElement>('deleteRule').onclick = async () => { settings.rules = settings.rules.filter((item) => item.id !== rule.id); await saveSettings(); dialog.close(); };
   byId<HTMLButtonElement>('cancelRule').onclick = () => dialog.close();
   dialog.showModal();
+}
+
+function formatJsonBody(id: 'requestBody' | 'responseBody'): void {
+  const textarea = byId<HTMLTextAreaElement>(id);
+  const error = byId<HTMLElement>(`${id}Error`);
+  try {
+    textarea.value = JSON.stringify(JSON.parse(textarea.value), null, 2);
+    error.hidden = true;
+    error.textContent = '';
+  } catch (cause) {
+    error.hidden = false;
+    error.textContent = cause instanceof Error ? cause.message : 'Invalid JSON';
+  }
+}
+
+function clearBodyFormatError(id: 'requestBody' | 'responseBody'): void {
+  const error = byId<HTMLElement>(`${id}Error`);
+  error.hidden = true;
+  error.textContent = '';
 }
 
 async function saveSettings() {

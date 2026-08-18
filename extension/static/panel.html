@@ -61,14 +61,22 @@
         <label>Profiles<input id="ruleProfiles" placeholder="Development, QA"></label>
       </div>
       <label>Request headers<textarea id="requestHeaders" placeholder="Authorization: Bearer token&#10;X-Debug: true"></textarea></label>
-      <label>Request body<textarea id="requestBody" placeholder="Use {{body}} to include the original body"></textarea></label>
+      <div class="body-field">
+        <div class="field-heading"><label for="requestBody">Request body</label><button id="formatRequestBody" class="field-tool" type="button" title="Format request body as JSON" aria-label="Format request body as JSON"><i data-lucide="braces"></i></button></div>
+        <textarea id="requestBody" placeholder="Use {{body}} to include the original body"></textarea>
+        <small id="requestBodyError" class="field-error" hidden></small>
+      </div>
       <label>Request JSON edits<textarea id="requestJsonEdits" placeholder="$.user.name=&quot;Test User&quot;&#10;$.flags[0]=true"></textarea></label>
       <div class="form-grid">
         <label>Status code<input id="responseStatus" type="number" min="100" max="599" placeholder="Keep actual status"></label>
         <label>Response preset<select id="responsePreset"><option value="">Custom</option></select></label>
       </div>
       <label>Response headers<textarea id="responseHeaders" placeholder="Content-Type: application/json&#10;X-Debug: modified"></textarea></label>
-      <label>Response body <small>Blank keeps the server body</small><textarea id="responseBody" placeholder='Enter replacement data, or use {{body}} to include the server body'></textarea></label>
+      <div class="body-field">
+        <div class="field-heading"><label for="responseBody">Response body <small>Blank keeps the server body</small></label><button id="formatResponseBody" class="field-tool" type="button" title="Format response body as JSON" aria-label="Format response body as JSON"><i data-lucide="braces"></i></button></div>
+        <textarea id="responseBody" placeholder='Enter replacement data, or use {{body}} to include the server body'></textarea>
+        <small id="responseBodyError" class="field-error" hidden></small>
+      </div>
       <label>Response JSON edits<textarea id="responseJsonEdits" placeholder="$.result.status=&quot;changed&quot;"></textarea></label>
       <div class="checks">
         <label class="check"><input id="ruleError" type="checkbox"> Simulate network error</label>

@@ -55,6 +55,7 @@ test('full mode replaces bodies at the response stage with retrievable metadata'
 
 test('panel describes response-stage modification and offers response copying', () => {
   const panel = readFileSync(resolve(dist, 'panel.js'), 'utf8');
+  const panelHtml = readFileSync(resolve(dist, 'panel.html'), 'utf8');
   assert.match(panel, /Copy response/);
   assert.match(panel, /Chrome network response stage/);
   assert.doesNotMatch(panel, /Override content/);
@@ -63,4 +64,7 @@ test('panel describes response-stage modification and offers response copying', 
   assert.match(panel, /enabled: fullModeEnabled/);
   assert.match(panel, /GitCompareArrows/);
   assert.match(panel, /Pause interception/);
+  assert.match(panel, /formatJsonBody/);
+  assert.match(panelHtml, /Format request body as JSON/);
+  assert.match(panelHtml, /Format response body as JSON/);
 });

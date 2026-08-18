@@ -299,6 +299,12 @@ var Activity = [
   ]
 ];
 
+// node_modules/lucide/dist/esm/icons/braces.mjs
+var Braces = [
+  ["path", { d: "M8 3H7a2 2 0 0 0-2 2v5a2 2 0 0 1-2 2 2 2 0 0 1 2 2v5c0 1.1.9 2 2 2h1" }],
+  ["path", { d: "M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" }]
+];
+
 // node_modules/lucide/dist/esm/icons/download.mjs
 var Download = [
   ["path", { d: "M12 15V3" }],
@@ -497,7 +503,7 @@ function render() {
   renderTraffic();
   renderRules();
   renderBreakpoints();
-  createIcons({ icons: { Activity, Download, FileJson: FileBraces, GitCompareArrows, Pause, Play, Trash2, Upload } });
+  createIcons({ icons: { Activity, Braces, Download, FileJson: FileBraces, GitCompareArrows, Pause, Play, Trash2, Upload } });
 }
 function renderTraffic() {
   const list = byId("trafficList");
@@ -593,6 +599,10 @@ function editRule(rule) {
   populatePresets();
   updateMatchPreview();
   byId("ruleUrl").oninput = updateMatchPreview;
+  byId("formatRequestBody").onclick = () => formatJsonBody("requestBody");
+  byId("formatResponseBody").onclick = () => formatJsonBody("responseBody");
+  clearBodyFormatError("requestBody");
+  clearBodyFormatError("responseBody");
   byId("deleteRule").hidden = !settings.rules.some((item) => item.id === rule.id);
   byId("saveRule").onclick = async () => {
     try {
@@ -627,6 +637,23 @@ function editRule(rule) {
   };
   byId("cancelRule").onclick = () => dialog.close();
   dialog.showModal();
+}
+function formatJsonBody(id) {
+  const textarea = byId(id);
+  const error = byId(`${id}Error`);
+  try {
+    textarea.value = JSON.stringify(JSON.parse(textarea.value), null, 2);
+    error.hidden = true;
+    error.textContent = "";
+  } catch (cause) {
+    error.hidden = false;
+    error.textContent = cause instanceof Error ? cause.message : "Invalid JSON";
+  }
+}
+function clearBodyFormatError(id) {
+  const error = byId(`${id}Error`);
+  error.hidden = true;
+  error.textContent = "";
 }
 async function saveSettings() {
   await chrome.storage.local.set({ settings });
@@ -784,6 +811,7 @@ lucide/dist/esm/shared/src/utils/toCamelCase.mjs:
 lucide/dist/esm/shared/src/utils/toPascalCase.mjs:
 lucide/dist/esm/replaceElement.mjs:
 lucide/dist/esm/icons/activity.mjs:
+lucide/dist/esm/icons/braces.mjs:
 lucide/dist/esm/icons/download.mjs:
 lucide/dist/esm/icons/file-braces.mjs:
 lucide/dist/esm/icons/git-compare-arrows.mjs:
