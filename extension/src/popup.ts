@@ -2,7 +2,6 @@ import { DEFAULT_SETTINGS, Settings } from './types';
 
 const toggle = document.querySelector<HTMLInputElement>('#enabled')!;
 const status = document.querySelector<HTMLElement>('#status')!;
-const openPanel = document.querySelector<HTMLButtonElement>('#openDevtools')!;
 
 async function load() {
   const stored = await chrome.storage.local.get('settings');
@@ -17,5 +16,4 @@ toggle.addEventListener('change', async () => {
   load();
 });
 
-openPanel.addEventListener('click', () => chrome.tabs.create({ url: 'chrome://inspect/#pages' }));
 load();
