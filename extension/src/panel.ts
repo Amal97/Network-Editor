@@ -2,7 +2,7 @@ import { DEFAULT_NETWORK_CONDITIONS, DEFAULT_SETTINGS, Rule, Settings, TrafficRe
 import { diagnoseRules, exportRules, formatHeaders, formatJsonEdits, importRules, lineDiff, NETWORK_PRESETS, parseHeaderInput, parseJsonEdits, RESPONSE_PRESETS, trafficToHar, urlMatches } from './rule-utils';
 import { Activity, Braces, createIcons, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } from 'lucide';
 
-const tabId = chrome.devtools.inspectedWindow.tabId;
+let tabId = 0;
 let settings: Settings = DEFAULT_SETTINGS;
 let traffic: TrafficRecord[] = [];
 let selectedId = '';
@@ -22,15 +22,17 @@ async function runtimeMessage<T = Record<string, unknown>>(message: unknown): Pr
 function showConnectionError(): void {
   const status = byId('modeStatus');
   status.hidden = false;
-  status.textContent = 'Extension context changed. Close DevTools, reload this page, then reopen DevTools.';
+  status.textContent = 'Extension context changed. Reload Network Modifier to reconnect.';
 }
 
 async function initialize() {
   try {
+    tabId = await resolveInitialTabId();
     const stored = await chrome.storage.local.get('settings');
     settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
     traffic = (await runtimeMessage<{ traffic?: TrafficRecord[] }>({ type: 'get-traffic', tabId }))?.traffic || [];
     wire();
+    await populateTargetTabs();
     render();
     await synchronizeInterceptionMode();
   } catch {
@@ -38,6 +40,39 @@ async function initialize() {
     render();
     showConnectionError();
   }
+}
+
+async function resolveInitialTabId(): Promise<number> {
+  const requested = Number(new URLSearchParams(location.search).get('tabId'));
+  if (requested > 0) return requested;
+  if (chrome.devtools?.inspectedWindow?.tabId) return chrome.devtools.inspectedWindow.tabId;
+  const stored = await chrome.storage.local.get('targetTabId');
+  if (Number(stored.targetTabId) > 0) return Number(stored.targetTabId);
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return active?.id || 0;
+}
+
+async function populateTargetTabs(): Promise<void> {
+  const select = byId<HTMLSelectElement>('targetTab');
+  const tabs = (await chrome.tabs.query({})).filter((tab) => tab.id !== undefined && /^https?:/.test(tab.url || ''));
+  if (!tabs.some((tab) => tab.id === tabId) && tabs[0]?.id !== undefined) tabId = tabs[0].id;
+  select.innerHTML = tabs.map((tab) => `<option value="${tab.id}">${escapeHtml(tab.title || tab.url || `Tab ${tab.id}`)}</option>`).join('');
+  select.value = String(tabId);
+  select.onchange = changeTargetTab;
+}
+
+async function changeTargetTab(event: Event): Promise<void> {
+  const previousTabId = tabId;
+  tabId = Number((event.target as HTMLSelectElement).value);
+  if (previousTabId && previousTabId !== tabId && settings.interceptionMode === 'full') {
+    await runtimeMessage({ type: 'configure-full-mode', tabId: previousTabId, enabled: false });
+  }
+  await chrome.storage.local.set({ targetTabId: tabId });
+  traffic = (await runtimeMessage<{ traffic?: TrafficRecord[] }>({ type: 'get-traffic', tabId }))?.traffic || [];
+  selectedId = '';
+  comparisonIds.clear();
+  render();
+  await synchronizeInterceptionMode();
 }
 
 async function synchronizeInterceptionMode(): Promise<void> {

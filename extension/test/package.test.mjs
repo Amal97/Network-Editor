@@ -71,14 +71,17 @@ test('panel describes response-stage modification and offers response copying', 
   assert.match(panelHtml, /Format response body as JSON/);
 });
 
-test('popup explains how to open Network Modifier', () => {
+test('popup opens a standalone Network Modifier dashboard', () => {
   const popup = readFileSync(resolve(dist, 'popup.js'), 'utf8');
   const popupHtml = readFileSync(resolve(dist, 'popup.html'), 'utf8');
   const devtools = readFileSync(resolve(dist, 'devtools.js'), 'utf8');
   const background = readFileSync(resolve(dist, 'background.js'), 'utf8');
-  assert.match(popupHtml, /Open DevTools with/);
-  assert.match(popupHtml, /Network Modifier/);
-  assert.doesNotMatch(popupHtml, /openDevtools/);
+  assert.match(popupHtml, /Open Network Modifier/);
+  assert.match(popupHtml, /openDashboard/);
+  assert.match(popup, /panel\.html/);
+  assert.match(popup, /chrome\.tabs\.create/);
+  assert.match(readFileSync(resolve(dist, 'panel.html'), 'utf8'), /targetTab/);
+  assert.match(readFileSync(resolve(dist, 'panel.js'), 'utf8'), /targetTabId/);
   assert.doesNotMatch(popup, /chrome:\/\/inspect/);
   assert.doesNotMatch(popup, /show-network-modifier/);
   assert.doesNotMatch(devtools, /network-modifier-devtools/);
