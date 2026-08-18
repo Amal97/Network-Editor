@@ -65,6 +65,8 @@ test('panel describes response-stage modification and offers response copying', 
   assert.match(panel, /GitCompareArrows/);
   assert.match(panel, /Pause interception/);
   assert.match(panel, /formatJsonBody/);
+  assert.match(panel, /updateResponseShape/);
+  assert.match(panel, /Shape mismatch/);
   assert.match(panelHtml, /Format request body as JSON/);
   assert.match(panelHtml, /Format response body as JSON/);
 });

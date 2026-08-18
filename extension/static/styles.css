@@ -93,6 +93,8 @@ dialog textarea { min-height: 105px; resize: vertical; font-family: var(--mono);
 .field-tool { display: inline-grid; width: 24px; min-height: 24px; padding: 0; place-items: center; }
 .field-tool svg { width: 14px; height: 14px; pointer-events: none; }
 .field-error { color: var(--danger); font-size: 11px; }
+.shape-hint { padding: 6px 8px; border-left: 3px solid #75a381; background: #eef7f0; color: #3d6548; font-size: 11px; }
+.shape-hint.warning { border-left-color: #c78b2a; background: #fff7e8; color: #825b1f; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .check { align-content: center; grid-template-columns: auto 1fr !important; align-items: center; padding-top: 17px; }
 .check input { width: auto; }

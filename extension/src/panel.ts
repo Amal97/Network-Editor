@@ -200,7 +200,13 @@ function editRule(rule: Rule) {
   byId<HTMLInputElement>('breakResponse').checked = Boolean(rule.breakOnResponse);
   populatePresets();
   updateMatchPreview();
-  byId<HTMLInputElement>('ruleUrl').oninput = updateMatchPreview;
+  updateResponseShape(rule);
+  byId<HTMLInputElement>('ruleUrl').oninput = () => {
+    updateMatchPreview();
+    updateResponseShape(rule);
+  };
+  byId<HTMLSelectElement>('ruleMethod').onchange = () => updateResponseShape(rule);
+  byId<HTMLTextAreaElement>('responseBody').oninput = () => updateResponseShape(rule);
   byId<HTMLButtonElement>('formatRequestBody').onclick = () => formatJsonBody('requestBody');
   byId<HTMLButtonElement>('formatResponseBody').onclick = () => formatJsonBody('responseBody');
   clearBodyFormatError('requestBody');
@@ -254,6 +260,42 @@ function clearBodyFormatError(id: 'requestBody' | 'responseBody'): void {
   const error = byId<HTMLElement>(`${id}Error`);
   error.hidden = true;
   error.textContent = '';
+}
+
+function updateResponseShape(rule: Rule): void {
+  const hint = byId('responseShape');
+  const method = byId<HTMLSelectElement>('ruleMethod').value;
+  const pattern = byId<HTMLInputElement>('ruleUrl').value;
+  const reference = [...traffic].reverse().find((record) =>
+    !record.ruleIds.includes(rule.id) &&
+    (method === '*' || record.method === method) &&
+    urlMatches(pattern, record.url) &&
+    jsonShape(record.responseBody) !== undefined
+  );
+  if (!reference) {
+    hint.className = 'shape-hint';
+    hint.textContent = 'Expected shape unknown. Disable this rule and capture one successful response to enable validation.';
+    return;
+  }
+  const expected = jsonShape(reference.responseBody)!;
+  const replacement = byId<HTMLTextAreaElement>('responseBody').value.trim();
+  const actual = replacement && !replacement.includes('{{body}}') ? jsonShape(replacement) : undefined;
+  hint.className = actual && actual !== expected ? 'shape-hint warning' : 'shape-hint';
+  hint.textContent = actual && actual !== expected
+    ? `Shape mismatch: captured response is ${expected}, replacement is ${actual}. The page may fail when it reads the response.`
+    : `Captured response shape: ${expected}. Keep the replacement top level compatible.`;
+}
+
+function jsonShape(value: string): 'array []' | 'object {}' | 'string' | 'number' | 'boolean' | 'null' | undefined {
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return 'array []';
+    if (parsed === null) return 'null';
+    if (typeof parsed === 'object') return 'object {}';
+    return typeof parsed as 'string' | 'number' | 'boolean';
+  } catch {
+    return undefined;
+  }
 }
 
 async function saveSettings() {

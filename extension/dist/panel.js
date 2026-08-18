@@ -598,7 +598,13 @@ function editRule(rule) {
   byId("breakResponse").checked = Boolean(rule.breakOnResponse);
   populatePresets();
   updateMatchPreview();
-  byId("ruleUrl").oninput = updateMatchPreview;
+  updateResponseShape(rule);
+  byId("ruleUrl").oninput = () => {
+    updateMatchPreview();
+    updateResponseShape(rule);
+  };
+  byId("ruleMethod").onchange = () => updateResponseShape(rule);
+  byId("responseBody").oninput = () => updateResponseShape(rule);
   byId("formatRequestBody").onclick = () => formatJsonBody("requestBody");
   byId("formatResponseBody").onclick = () => formatJsonBody("responseBody");
   clearBodyFormatError("requestBody");
@@ -654,6 +660,35 @@ function clearBodyFormatError(id) {
   const error = byId(`${id}Error`);
   error.hidden = true;
   error.textContent = "";
+}
+function updateResponseShape(rule) {
+  const hint = byId("responseShape");
+  const method = byId("ruleMethod").value;
+  const pattern = byId("ruleUrl").value;
+  const reference = [...traffic].reverse().find(
+    (record) => !record.ruleIds.includes(rule.id) && (method === "*" || record.method === method) && urlMatches(pattern, record.url) && jsonShape(record.responseBody) !== void 0
+  );
+  if (!reference) {
+    hint.className = "shape-hint";
+    hint.textContent = "Expected shape unknown. Disable this rule and capture one successful response to enable validation.";
+    return;
+  }
+  const expected = jsonShape(reference.responseBody);
+  const replacement = byId("responseBody").value.trim();
+  const actual = replacement && !replacement.includes("{{body}}") ? jsonShape(replacement) : void 0;
+  hint.className = actual && actual !== expected ? "shape-hint warning" : "shape-hint";
+  hint.textContent = actual && actual !== expected ? `Shape mismatch: captured response is ${expected}, replacement is ${actual}. The page may fail when it reads the response.` : `Captured response shape: ${expected}. Keep the replacement top level compatible.`;
+}
+function jsonShape(value) {
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return "array []";
+    if (parsed === null) return "null";
+    if (typeof parsed === "object") return "object {}";
+    return typeof parsed;
+  } catch {
+    return void 0;
+  }
 }
 async function saveSettings() {
   await chrome.storage.local.set({ settings });

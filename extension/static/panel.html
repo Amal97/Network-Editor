@@ -74,6 +74,7 @@
       <label>Response headers<textarea id="responseHeaders" placeholder="Content-Type: application/json&#10;X-Debug: modified"></textarea></label>
       <div class="body-field">
         <div class="field-heading"><label for="responseBody">Response body <small>Blank keeps the server body</small></label><button id="formatResponseBody" class="field-tool" type="button" title="Format response body as JSON" aria-label="Format response body as JSON"><i data-lucide="braces"></i></button></div>
+        <div id="responseShape" class="shape-hint"></div>
         <textarea id="responseBody" placeholder='Enter replacement data, or use {{body}} to include the server body'></textarea>
         <small id="responseBodyError" class="field-error" hidden></small>
       </div>
