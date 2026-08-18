@@ -1,5 +1,6 @@
 import { DEFAULT_NETWORK_CONDITIONS, DEFAULT_SETTINGS, Rule, Settings, TrafficRecord } from './types';
 import { diagnoseRules, exportRules, formatHeaders, formatJsonEdits, importRules, lineDiff, NETWORK_PRESETS, parseHeaderInput, parseJsonEdits, RESPONSE_PRESETS, trafficToHar, urlMatches } from './rule-utils';
+import { Activity, createIcons, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } from 'lucide';
 
 const tabId = chrome.devtools.inspectedWindow.tabId;
 let settings: Settings = DEFAULT_SETTINGS;
@@ -31,10 +32,29 @@ async function initialize() {
     traffic = (await runtimeMessage<{ traffic?: TrafficRecord[] }>({ type: 'get-traffic', tabId }))?.traffic || [];
     wire();
     render();
+    await synchronizeInterceptionMode();
   } catch {
     wire();
     render();
     showConnectionError();
+  }
+}
+
+async function synchronizeInterceptionMode(): Promise<void> {
+  const fullModeEnabled = settings.enabled && settings.interceptionMode === 'full';
+  const result = await runtimeMessage<{ ok: boolean; error?: string }>({
+    type: 'configure-full-mode',
+    tabId,
+    enabled: fullModeEnabled
+  });
+  if (!result) {
+    showConnectionError();
+    return;
+  }
+  if (!result.ok) {
+    const status = byId('modeStatus');
+    status.hidden = false;
+    status.textContent = result.error || 'Could not activate Full mode.';
   }
 }
 
@@ -72,13 +92,18 @@ function wire() {
 }
 
 function render() {
-  byId<HTMLButtonElement>('pause').textContent = settings.enabled ? 'Pause' : 'Resume';
+  const pause = byId<HTMLButtonElement>('pause');
+  const pauseLabel = settings.enabled ? 'Pause interception' : 'Resume interception';
+  pause.title = pauseLabel;
+  pause.setAttribute('aria-label', pauseLabel);
+  pause.innerHTML = `<i data-lucide="${settings.enabled ? 'pause' : 'play'}"></i>`;
   byId<HTMLSelectElement>('mode').value = settings.interceptionMode || 'page';
   renderModeStatus();
   renderProfiles();
   renderTraffic();
   renderRules();
   renderBreakpoints();
+  createIcons({ icons: { Activity, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } });
 }
 
 function renderTraffic() {

@@ -174,6 +174,234 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// node_modules/lucide/dist/esm/defaultAttributes.mjs
+var defaultAttributes = {
+  xmlns: "http://www.w3.org/2000/svg",
+  width: 24,
+  height: 24,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  "stroke-width": 2,
+  "stroke-linecap": "round",
+  "stroke-linejoin": "round"
+};
+
+// node_modules/lucide/dist/esm/createElement.mjs
+var createSVGElement = ([tag, attrs, children]) => {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.keys(attrs).forEach((name) => {
+    element.setAttribute(name, String(attrs[name]));
+  });
+  if (children?.length) {
+    children.forEach((child) => {
+      const childElement = createSVGElement(child);
+      element.appendChild(childElement);
+    });
+  }
+  return element;
+};
+var createElement = (iconNode, customAttrs = {}) => {
+  const tag = "svg";
+  const attrs = {
+    ...defaultAttributes,
+    ...customAttrs
+  };
+  return createSVGElement([tag, attrs, iconNode]);
+};
+
+// node_modules/lucide/dist/esm/shared/src/utils/hasA11yProp.mjs
+var hasA11yProp = (props) => {
+  for (const prop in props) {
+    if (prop.startsWith("aria-") || prop === "role" || prop === "title") {
+      return true;
+    }
+  }
+  return false;
+};
+
+// node_modules/lucide/dist/esm/shared/src/utils/mergeClasses.mjs
+var mergeClasses = (...classes) => classes.filter((className, index, array) => {
+  return Boolean(className) && className.trim() !== "" && array.indexOf(className) === index;
+}).join(" ").trim();
+
+// node_modules/lucide/dist/esm/shared/src/utils/toCamelCase.mjs
+var toCamelCase = (string) => string.replace(
+  /^([A-Z])|[\s-_]+(\w)/g,
+  (match, p1, p2) => p2 ? p2.toUpperCase() : p1.toLowerCase()
+);
+
+// node_modules/lucide/dist/esm/shared/src/utils/toPascalCase.mjs
+var toPascalCase = (string) => {
+  const camelCase = toCamelCase(string);
+  return camelCase.charAt(0).toUpperCase() + camelCase.slice(1);
+};
+
+// node_modules/lucide/dist/esm/replaceElement.mjs
+var getAttrs = (element) => Array.from(element.attributes).reduce((attrs, attr) => {
+  attrs[attr.name] = attr.value;
+  return attrs;
+}, {});
+var getClassNames = (attrs) => {
+  if (typeof attrs === "string") return attrs;
+  if (!attrs || !attrs.class) return "";
+  if (attrs.class && typeof attrs.class === "string") {
+    return attrs.class.split(" ");
+  }
+  if (attrs.class && Array.isArray(attrs.class)) {
+    return attrs.class;
+  }
+  return "";
+};
+var replaceElement = (element, { nameAttr, icons, attrs }) => {
+  const iconName = element.getAttribute(nameAttr);
+  if (iconName == null) return;
+  const ComponentName = toPascalCase(iconName);
+  const iconNode = icons[ComponentName];
+  if (!iconNode) {
+    return console.warn(
+      `${element.outerHTML} icon name was not found in the provided icons object.`
+    );
+  }
+  const elementAttrs = getAttrs(element);
+  const ariaProps = hasA11yProp(elementAttrs) ? {} : { "aria-hidden": "true" };
+  const iconAttrs = {
+    ...defaultAttributes,
+    "data-lucide": iconName,
+    ...ariaProps,
+    ...attrs,
+    ...elementAttrs
+  };
+  const elementClassNames = getClassNames(elementAttrs);
+  const className = getClassNames(attrs);
+  const classNames = mergeClasses(
+    "lucide",
+    `lucide-${iconName}`,
+    ...elementClassNames,
+    ...className
+  );
+  if (classNames) {
+    Object.assign(iconAttrs, {
+      class: classNames
+    });
+  }
+  const svgElement = createElement(iconNode, iconAttrs);
+  return element.parentNode?.replaceChild(svgElement, element);
+};
+
+// node_modules/lucide/dist/esm/icons/activity.mjs
+var Activity = [
+  [
+    "path",
+    {
+      d: "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"
+    }
+  ]
+];
+
+// node_modules/lucide/dist/esm/icons/download.mjs
+var Download = [
+  ["path", { d: "M12 15V3" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }],
+  ["path", { d: "m7 10 5 5 5-5" }]
+];
+
+// node_modules/lucide/dist/esm/icons/file-braces.mjs
+var FileBraces = [
+  [
+    "path",
+    {
+      d: "M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"
+    }
+  ],
+  ["path", { d: "M14 2v5a1 1 0 0 0 1 1h5" }],
+  ["path", { d: "M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1" }],
+  ["path", { d: "M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1" }]
+];
+
+// node_modules/lucide/dist/esm/icons/git-compare-arrows.mjs
+var GitCompareArrows = [
+  ["circle", { cx: "5", cy: "6", r: "3" }],
+  ["path", { d: "M12 6h5a2 2 0 0 1 2 2v7" }],
+  ["path", { d: "m15 9-3-3 3-3" }],
+  ["circle", { cx: "19", cy: "18", r: "3" }],
+  ["path", { d: "M12 18H7a2 2 0 0 1-2-2V9" }],
+  ["path", { d: "m9 15 3 3-3 3" }]
+];
+
+// node_modules/lucide/dist/esm/icons/pause.mjs
+var Pause = [
+  ["rect", { x: "14", y: "3", width: "5", height: "18", rx: "1" }],
+  ["rect", { x: "5", y: "3", width: "5", height: "18", rx: "1" }]
+];
+
+// node_modules/lucide/dist/esm/icons/play.mjs
+var Play = [
+  [
+    "path",
+    { d: "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" }
+  ]
+];
+
+// node_modules/lucide/dist/esm/icons/trash-2.mjs
+var Trash2 = [
+  ["path", { d: "M10 11v6" }],
+  ["path", { d: "M14 11v6" }],
+  ["path", { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" }],
+  ["path", { d: "M3 6h18" }],
+  ["path", { d: "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }]
+];
+
+// node_modules/lucide/dist/esm/icons/upload.mjs
+var Upload = [
+  ["path", { d: "M12 3v12" }],
+  ["path", { d: "m17 8-5-5-5 5" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }]
+];
+
+// node_modules/lucide/dist/esm/lucide.mjs
+var createIcons = ({
+  icons = {},
+  nameAttr = "data-lucide",
+  attrs = {},
+  root = document,
+  inTemplates
+} = {}) => {
+  if (!Object.values(icons).length) {
+    throw new Error(
+      "Please provide an icons object.\nIf you want to use all the icons you can import it like:\n `import { createIcons, icons } from 'lucide';\nlucide.createIcons({icons});`"
+    );
+  }
+  if (typeof root === "undefined") {
+    throw new Error("`createIcons()` only works in a browser environment.");
+  }
+  const elementsToReplace = Array.from(root.querySelectorAll(`[${nameAttr}]`));
+  elementsToReplace.forEach((element) => replaceElement(element, { nameAttr, icons, attrs }));
+  if (inTemplates) {
+    const templates = Array.from(root.querySelectorAll("template"));
+    templates.forEach(
+      (template) => createIcons({
+        icons,
+        nameAttr,
+        attrs,
+        root: template.content,
+        inTemplates
+      })
+    );
+  }
+  if (nameAttr === "data-lucide") {
+    const deprecatedElements = root.querySelectorAll("[icon-name]");
+    if (deprecatedElements.length > 0) {
+      console.warn(
+        "[Lucide] Some icons were found with the now deprecated icon-name attribute. These will still be replaced for backwards compatibility, but will no longer be supported in v1.0 and you should switch to data-lucide"
+      );
+      Array.from(deprecatedElements).forEach(
+        (element) => replaceElement(element, { nameAttr: "icon-name", icons, attrs })
+      );
+    }
+  }
+};
+
 // src/panel.ts
 var tabId = chrome.devtools.inspectedWindow.tabId;
 var settings = DEFAULT_SETTINGS;
@@ -201,10 +429,28 @@ async function initialize() {
     traffic = (await runtimeMessage({ type: "get-traffic", tabId }))?.traffic || [];
     wire();
     render();
+    await synchronizeInterceptionMode();
   } catch {
     wire();
     render();
     showConnectionError();
+  }
+}
+async function synchronizeInterceptionMode() {
+  const fullModeEnabled = settings.enabled && settings.interceptionMode === "full";
+  const result = await runtimeMessage({
+    type: "configure-full-mode",
+    tabId,
+    enabled: fullModeEnabled
+  });
+  if (!result) {
+    showConnectionError();
+    return;
+  }
+  if (!result.ok) {
+    const status = byId("modeStatus");
+    status.hidden = false;
+    status.textContent = result.error || "Could not activate Full mode.";
   }
 }
 function wire() {
@@ -240,13 +486,18 @@ function wire() {
   });
 }
 function render() {
-  byId("pause").textContent = settings.enabled ? "Pause" : "Resume";
+  const pause = byId("pause");
+  const pauseLabel = settings.enabled ? "Pause interception" : "Resume interception";
+  pause.title = pauseLabel;
+  pause.setAttribute("aria-label", pauseLabel);
+  pause.innerHTML = `<i data-lucide="${settings.enabled ? "pause" : "play"}"></i>`;
   byId("mode").value = settings.interceptionMode || "page";
   renderModeStatus();
   renderProfiles();
   renderTraffic();
   renderRules();
   renderBreakpoints();
+  createIcons({ icons: { Activity, Download, FileJson: FileBraces, GitCompareArrows, Pause, Play, Trash2, Upload } });
 }
 function renderTraffic() {
   const list = byId("trafficList");
@@ -523,4 +774,29 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 }
 initialize().catch(showConnectionError);
+/*! Bundled license information:
+
+lucide/dist/esm/defaultAttributes.mjs:
+lucide/dist/esm/createElement.mjs:
+lucide/dist/esm/shared/src/utils/hasA11yProp.mjs:
+lucide/dist/esm/shared/src/utils/mergeClasses.mjs:
+lucide/dist/esm/shared/src/utils/toCamelCase.mjs:
+lucide/dist/esm/shared/src/utils/toPascalCase.mjs:
+lucide/dist/esm/replaceElement.mjs:
+lucide/dist/esm/icons/activity.mjs:
+lucide/dist/esm/icons/download.mjs:
+lucide/dist/esm/icons/file-braces.mjs:
+lucide/dist/esm/icons/git-compare-arrows.mjs:
+lucide/dist/esm/icons/pause.mjs:
+lucide/dist/esm/icons/play.mjs:
+lucide/dist/esm/icons/trash-2.mjs:
+lucide/dist/esm/icons/upload.mjs:
+lucide/dist/esm/lucide.mjs:
+  (**
+   * @license lucide v1.31.0 - ISC
+   *
+   * This source code is licensed under the ISC license.
+   * See the LICENSE file in the root directory of this source tree.
+   *)
+*/
 //# sourceMappingURL=panel.js.map

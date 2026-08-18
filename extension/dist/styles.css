@@ -48,10 +48,13 @@ button:hover { background: #eef1f4; }
 .rule-row small { color: #929ba7; }
 .rule-row button { min-height: 25px; padding: 2px 6px; border-color: #424b57; background: transparent; color: #bbc2cc; }
 .panel main { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
-.toolbar { display: flex; align-items: center; gap: 7px; min-height: 52px; padding: 9px 12px; border-bottom: 1px solid var(--line); background: #fff; overflow-x: auto; }
-.toolbar input { min-width: 160px; max-width: 480px; flex: 1; padding: 7px 9px; border: 1px solid #cbd1d7; border-radius: 5px; }
-.toolbar select { min-height: 30px; border: 1px solid #cbd1d7; border-radius: 5px; background: #fff; }
-.toolbar span { margin-left: auto; color: var(--faint); }
+.toolbar { display: flex; align-items: center; gap: 4px; min-height: 40px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: #fff; overflow-x: auto; }
+.toolbar input { min-width: 130px; max-width: 300px; height: 27px; flex: 1; padding: 4px 7px; border: 1px solid #cbd1d7; border-radius: 4px; }
+.toolbar select { height: 27px; min-height: 27px; flex: none; padding: 2px 4px; border: 1px solid #cbd1d7; border-radius: 4px; background: #fff; font-size: 12px; }
+.toolbar button { min-height: 27px; flex: none; padding: 3px 7px; border-radius: 4px; font-size: 12px; }
+.toolbar .toolbar-icon { display: inline-grid; width: 27px; padding: 0; place-items: center; }
+.toolbar .toolbar-icon svg { width: 15px; height: 15px; pointer-events: none; }
+.toolbar span { margin-left: auto; flex: none; padding: 0 3px; color: var(--faint); font-size: 11px; white-space: nowrap; }
 .mode-status { padding: 8px 12px; border-bottom: 1px solid #edc8c8; background: #fff0f0; color: #8b2525; }
 .breakpoints { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e1c262; background: #fff8d8; }
 .traffic-layout { display: grid; min-height: 0; flex: 1; grid-template-columns: minmax(360px, 44%) minmax(0, 1fr); }

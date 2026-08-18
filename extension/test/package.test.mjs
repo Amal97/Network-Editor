@@ -59,4 +59,8 @@ test('panel describes response-stage modification and offers response copying', 
   assert.match(panel, /Chrome network response stage/);
   assert.doesNotMatch(panel, /Override content/);
   assert.match(panel, /navigator\.clipboard\.writeText/);
+  assert.match(panel, /synchronizeInterceptionMode/);
+  assert.match(panel, /enabled: fullModeEnabled/);
+  assert.match(panel, /GitCompareArrows/);
+  assert.match(panel, /Pause interception/);
 });

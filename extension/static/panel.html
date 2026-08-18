@@ -23,13 +23,13 @@
       <select id="profile" title="Active profile"><option>All</option></select>
       <select id="mode" title="Interception mode"><option value="page">Page mode</option><option value="full">Full mode</option></select>
       <span id="count">0 requests</span>
-      <button id="network">Network</button>
-      <button id="compare">Compare</button>
-      <button id="importRules">Import</button>
-      <button id="exportRules">Rules JSON</button>
-      <button id="exportHar">HAR</button>
-      <button id="pause">Pause</button>
-      <button id="clear">Clear</button>
+      <button id="network" class="toolbar-icon" title="Network conditions" aria-label="Network conditions"><i data-lucide="activity"></i></button>
+      <button id="compare" class="toolbar-icon" title="Compare responses" aria-label="Compare responses"><i data-lucide="git-compare-arrows"></i></button>
+      <button id="importRules" class="toolbar-icon" title="Import rules" aria-label="Import rules"><i data-lucide="upload"></i></button>
+      <button id="exportRules" class="toolbar-icon" title="Export rules JSON" aria-label="Export rules JSON"><i data-lucide="file-json"></i></button>
+      <button id="exportHar" class="toolbar-icon" title="Export traffic as HAR" aria-label="Export traffic as HAR"><i data-lucide="download"></i></button>
+      <button id="pause" class="toolbar-icon" title="Pause interception" aria-label="Pause interception"><i data-lucide="pause"></i></button>
+      <button id="clear" class="toolbar-icon" title="Clear traffic" aria-label="Clear traffic"><i data-lucide="trash-2"></i></button>
       <input id="ruleFile" type="file" accept="application/json,.json,.har" hidden>
     </div>
     <div id="modeStatus" class="mode-status" hidden></div>
