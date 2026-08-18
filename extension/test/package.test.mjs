@@ -71,6 +71,9 @@ test('panel describes response-stage modification and offers response copying', 
   assert.match(panel, /Shape mismatch/);
   assert.match(panelHtml, /Format request body as JSON/);
   assert.match(panelHtml, /Format response body as JSON/);
+  assert.match(panelHtml, /Page — JavaScript only/);
+  assert.match(panelHtml, /Full — Chrome network/);
+  assert.match(panelHtml, /appears in the Network tab/);
 });
 
 test('popup opens a standalone Network Modifier dashboard', () => {
@@ -97,6 +100,9 @@ test('dashboard supports per-tab modes, retention, live tabs, and attachment sta
   const panelHtml = readFileSync(resolve(dist, 'panel.html'), 'utf8');
   assert.match(panel, /tabModes/);
   assert.match(panel, /attachment-status-changed/);
+  assert.match(panel, /statusTabId !== tabId/);
+  assert.match(panel, /Connecting/);
+  assert.match(panel, /modeForTab\(settings, previousTabId\)/);
   assert.match(panel, /onCreated\.addListener/);
   assert.match(panel, /Delete rule/);
   assert.match(background, /get-effective-settings/);

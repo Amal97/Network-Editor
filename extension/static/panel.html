@@ -22,7 +22,8 @@
       <select id="targetTab" class="target-tab" title="Target browser tab" aria-label="Target browser tab"></select>
       <input id="search" placeholder="Search requests">
       <select id="profile" title="Active profile"><option>All</option></select>
-      <select id="mode" title="Interception mode"><option value="page">Page mode</option><option value="full">Full mode</option></select>
+      <select id="mode" title="Choose how requests are modified"><option value="page">Page — JavaScript only</option><option value="full">Full — Chrome network</option></select>
+      <button class="toolbar-icon mode-help" title="Page mode modifies Fetch and XHR as seen by page JavaScript. Full mode modifies Chrome network responses, appears in the Network tab, and shows Chrome's debugging banner." aria-label="About interception modes"><i data-lucide="circle-help"></i></button>
       <span id="connectionStatus" class="connection-status">Checking…</span>
       <span id="count">0 requests</span>
       <button id="network" class="toolbar-icon" title="Network conditions" aria-label="Network conditions"><i data-lucide="activity"></i></button>

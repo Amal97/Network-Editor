@@ -1,6 +1,6 @@
 import { DEFAULT_NETWORK_CONDITIONS, DEFAULT_SETTINGS, modeForTab, Rule, Settings, TrafficRecord } from './types';
 import { diagnoseRules, exportRules, formatHeaders, formatJsonEdits, importRules, lineDiff, NETWORK_PRESETS, parseHeaderInput, parseJsonEdits, RESPONSE_PRESETS, trafficToHar, urlMatches } from './rule-utils';
-import { Activity, Braces, createIcons, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } from 'lucide';
+import { Activity, Braces, CircleHelp, createIcons, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } from 'lucide';
 
 let tabId = 0;
 let settings: Settings = DEFAULT_SETTINGS;
@@ -70,7 +70,7 @@ async function refreshTargetTabs(): Promise<void> {
 async function changeTargetTab(event: Event): Promise<void> {
   const previousTabId = tabId;
   tabId = Number((event.target as HTMLSelectElement).value);
-  if (previousTabId && previousTabId !== tabId && settings.interceptionMode === 'full') {
+  if (previousTabId && previousTabId !== tabId && modeForTab(settings, previousTabId) === 'full') {
     await runtimeMessage({ type: 'configure-full-mode', tabId: previousTabId, enabled: false });
   }
   await chrome.storage.local.set({ targetTabId: tabId });
@@ -78,6 +78,7 @@ async function changeTargetTab(event: Event): Promise<void> {
   selectedId = '';
   comparisonIds.clear();
   render();
+  if (settings.enabled && modeForTab(settings, tabId) === 'full') setConnectionStatus('Connecting…', '');
   await synchronizeInterceptionMode();
 }
 
@@ -90,6 +91,7 @@ async function synchronizeInterceptionMode(): Promise<void> {
   });
   if (!result) {
     showConnectionError();
+    setConnectionStatus('Connection unavailable', 'error');
     return;
   }
   if (!result.ok) {
@@ -97,6 +99,7 @@ async function synchronizeInterceptionMode(): Promise<void> {
     status.hidden = false;
     status.textContent = result.error || 'Could not activate Full mode.';
   }
+  await renderConnectionStatus();
 }
 
 function wire() {
@@ -164,25 +167,29 @@ function render() {
   renderRules();
   renderBreakpoints();
   renderConnectionStatus();
-  createIcons({ icons: { Activity, Braces, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } });
+  createIcons({ icons: { Activity, Braces, CircleHelp, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } });
 }
 
 async function renderConnectionStatus(): Promise<void> {
-  const status = byId('connectionStatus');
-  const mode = modeForTab(settings, tabId);
+  const statusTabId = tabId;
+  const mode = modeForTab(settings, statusTabId);
   if (!settings.enabled) {
-    status.className = 'connection-status';
-    status.textContent = 'Paused';
+    setConnectionStatus('Paused', '');
     return;
   }
   if (mode === 'page') {
-    status.className = 'connection-status connected';
-    status.textContent = 'Page mode';
+    setConnectionStatus('Page mode', 'connected');
     return;
   }
-  const result = await runtimeMessage<{ attached?: boolean }>({ type: 'get-attachment-status', tabId });
-  status.className = `connection-status ${result?.attached ? 'connected' : 'error'}`;
-  status.textContent = result?.attached ? 'Full mode connected' : 'Full mode disconnected';
+  const result = await runtimeMessage<{ attached?: boolean }>({ type: 'get-attachment-status', tabId: statusTabId });
+  if (statusTabId !== tabId) return;
+  setConnectionStatus(result?.attached ? 'Full mode connected' : 'Full mode disconnected', result?.attached ? 'connected' : 'error');
+}
+
+function setConnectionStatus(text: string, state: '' | 'connected' | 'error'): void {
+  const status = byId('connectionStatus');
+  status.className = `connection-status${state ? ` ${state}` : ''}`;
+  status.textContent = text;
 }
 
 function renderTraffic() {

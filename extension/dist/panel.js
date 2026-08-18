@@ -312,6 +312,13 @@ var Braces = [
   ["path", { d: "M16 21h1a2 2 0 0 0 2-2v-5c0-1.1.9-2 2-2a2 2 0 0 1-2-2V5a2 2 0 0 0-2-2h-1" }]
 ];
 
+// node_modules/lucide/dist/esm/icons/circle-question-mark.mjs
+var CircleQuestionMark = [
+  ["circle", { cx: "12", cy: "12", r: "10" }],
+  ["path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" }],
+  ["path", { d: "M12 17h.01" }]
+];
+
 // node_modules/lucide/dist/esm/icons/download.mjs
 var Download = [
   ["path", { d: "M12 15V3" }],
@@ -476,7 +483,7 @@ async function refreshTargetTabs() {
 async function changeTargetTab(event) {
   const previousTabId = tabId;
   tabId = Number(event.target.value);
-  if (previousTabId && previousTabId !== tabId && settings.interceptionMode === "full") {
+  if (previousTabId && previousTabId !== tabId && modeForTab(settings, previousTabId) === "full") {
     await runtimeMessage({ type: "configure-full-mode", tabId: previousTabId, enabled: false });
   }
   await chrome.storage.local.set({ targetTabId: tabId });
@@ -484,6 +491,7 @@ async function changeTargetTab(event) {
   selectedId = "";
   comparisonIds.clear();
   render();
+  if (settings.enabled && modeForTab(settings, tabId) === "full") setConnectionStatus("Connecting\u2026", "");
   await synchronizeInterceptionMode();
 }
 async function synchronizeInterceptionMode() {
@@ -495,6 +503,7 @@ async function synchronizeInterceptionMode() {
   });
   if (!result) {
     showConnectionError();
+    setConnectionStatus("Connection unavailable", "error");
     return;
   }
   if (!result.ok) {
@@ -502,6 +511,7 @@ async function synchronizeInterceptionMode() {
     status.hidden = false;
     status.textContent = result.error || "Could not activate Full mode.";
   }
+  await renderConnectionStatus();
 }
 function wire() {
   byId("clear").onclick = async () => {
@@ -566,24 +576,27 @@ function render() {
   renderRules();
   renderBreakpoints();
   renderConnectionStatus();
-  createIcons({ icons: { Activity, Braces, Download, FileJson: FileBraces, GitCompareArrows, Pause, Play, Trash2, Upload } });
+  createIcons({ icons: { Activity, Braces, CircleHelp: CircleQuestionMark, Download, FileJson: FileBraces, GitCompareArrows, Pause, Play, Trash2, Upload } });
 }
 async function renderConnectionStatus() {
-  const status = byId("connectionStatus");
-  const mode = modeForTab(settings, tabId);
+  const statusTabId = tabId;
+  const mode = modeForTab(settings, statusTabId);
   if (!settings.enabled) {
-    status.className = "connection-status";
-    status.textContent = "Paused";
+    setConnectionStatus("Paused", "");
     return;
   }
   if (mode === "page") {
-    status.className = "connection-status connected";
-    status.textContent = "Page mode";
+    setConnectionStatus("Page mode", "connected");
     return;
   }
-  const result = await runtimeMessage({ type: "get-attachment-status", tabId });
-  status.className = `connection-status ${result?.attached ? "connected" : "error"}`;
-  status.textContent = result?.attached ? "Full mode connected" : "Full mode disconnected";
+  const result = await runtimeMessage({ type: "get-attachment-status", tabId: statusTabId });
+  if (statusTabId !== tabId) return;
+  setConnectionStatus(result?.attached ? "Full mode connected" : "Full mode disconnected", result?.attached ? "connected" : "error");
+}
+function setConnectionStatus(text, state) {
+  const status = byId("connectionStatus");
+  status.className = `connection-status${state ? ` ${state}` : ""}`;
+  status.textContent = text;
 }
 function renderTraffic() {
   const list = byId("trafficList");
@@ -940,6 +953,7 @@ lucide/dist/esm/shared/src/utils/toPascalCase.mjs:
 lucide/dist/esm/replaceElement.mjs:
 lucide/dist/esm/icons/activity.mjs:
 lucide/dist/esm/icons/braces.mjs:
+lucide/dist/esm/icons/circle-question-mark.mjs:
 lucide/dist/esm/icons/download.mjs:
 lucide/dist/esm/icons/file-braces.mjs:
 lucide/dist/esm/icons/git-compare-arrows.mjs:
