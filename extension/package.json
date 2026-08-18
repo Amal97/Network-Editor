@@ -1,18 +1,22 @@
 {
   "name": "network-modifier-extension",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "private": true,
-  "description": "Chrome DevTools extension for monitoring and modifying frontend XHR/fetch traffic.",
+  "description": "Chrome extension for monitoring and modifying frontend XHR/fetch traffic.",
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "icons": "node scripts/generate-icons.mjs",
+    "build": "npm run icons && node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "package": "npm run build && npm run typecheck && npm test && node scripts/package.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.31",
+    "archiver": "^8.0.0",
     "esbuild": "^0.25.9",
+    "sharp": "^0.35.3",
     "typescript": "^5.9.2"
   },
   "dependencies": {

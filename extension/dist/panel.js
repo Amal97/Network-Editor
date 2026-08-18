@@ -10,9 +10,16 @@ var DEFAULT_SETTINGS = {
   enabled: true,
   rules: [],
   interceptionMode: "page",
+  tabModes: {},
   activeProfiles: ["All"],
-  networkConditions: DEFAULT_NETWORK_CONDITIONS
+  networkConditions: DEFAULT_NETWORK_CONDITIONS,
+  trafficLimit: 1e3,
+  trafficFilter: "",
+  preserveTraffic: true
 };
+function modeForTab(settings2, tabId2) {
+  return settings2.tabModes?.[String(tabId2)] || settings2.interceptionMode || "page";
+}
 
 // src/rule-utils.ts
 var RESPONSE_PRESETS = [
@@ -461,6 +468,11 @@ async function populateTargetTabs() {
   select.value = String(tabId);
   select.onchange = changeTargetTab;
 }
+async function refreshTargetTabs() {
+  const currentTabId = tabId;
+  await populateTargetTabs();
+  if (currentTabId !== tabId) await changeTargetTab({ target: byId("targetTab") });
+}
 async function changeTargetTab(event) {
   const previousTabId = tabId;
   tabId = Number(event.target.value);
@@ -475,7 +487,7 @@ async function changeTargetTab(event) {
   await synchronizeInterceptionMode();
 }
 async function synchronizeInterceptionMode() {
-  const fullModeEnabled = settings.enabled && settings.interceptionMode === "full";
+  const fullModeEnabled = settings.enabled && modeForTab(settings, tabId) === "full";
   const result = await runtimeMessage({
     type: "configure-full-mode",
     tabId,
@@ -521,7 +533,25 @@ function wire() {
       renderTraffic();
     }
     if (message?.type === "breakpoints-changed" && message.tabId === tabId) renderBreakpoints();
+    if (message?.type === "attachment-status-changed" && message.tabId === tabId) renderConnectionStatus();
   });
+  chrome.tabs.onCreated.addListener(refreshTargetTabs);
+  chrome.tabs.onRemoved.addListener(refreshTargetTabs);
+  chrome.tabs.onUpdated.addListener(refreshTargetTabs);
+  document.addEventListener("keydown", navigateTraffic);
+}
+function navigateTraffic(event) {
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || byId("ruleDialog").open) return;
+  if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+  const visible = traffic.filter((record) => `${record.method} ${record.url} ${record.status}`.toLowerCase().includes(byId("search").value.toLowerCase())).reverse();
+  if (!visible.length) return;
+  const current = visible.findIndex((record) => record.id === selectedId);
+  const next = event.key === "ArrowDown" ? Math.min(visible.length - 1, current + 1) : Math.max(0, current < 0 ? 0 : current - 1);
+  selectedId = visible[next].id;
+  renderTraffic();
+  renderDetail(visible[next]);
+  document.querySelector(".traffic-row.selected")?.scrollIntoView({ block: "nearest" });
+  event.preventDefault();
 }
 function render() {
   const pause = byId("pause");
@@ -529,13 +559,31 @@ function render() {
   pause.title = pauseLabel;
   pause.setAttribute("aria-label", pauseLabel);
   pause.innerHTML = `<i data-lucide="${settings.enabled ? "pause" : "play"}"></i>`;
-  byId("mode").value = settings.interceptionMode || "page";
+  byId("mode").value = modeForTab(settings, tabId);
   renderModeStatus();
   renderProfiles();
   renderTraffic();
   renderRules();
   renderBreakpoints();
+  renderConnectionStatus();
   createIcons({ icons: { Activity, Braces, Download, FileJson: FileBraces, GitCompareArrows, Pause, Play, Trash2, Upload } });
+}
+async function renderConnectionStatus() {
+  const status = byId("connectionStatus");
+  const mode = modeForTab(settings, tabId);
+  if (!settings.enabled) {
+    status.className = "connection-status";
+    status.textContent = "Paused";
+    return;
+  }
+  if (mode === "page") {
+    status.className = "connection-status connected";
+    status.textContent = "Page mode";
+    return;
+  }
+  const result = await runtimeMessage({ type: "get-attachment-status", tabId });
+  status.className = `connection-status ${result?.attached ? "connected" : "error"}`;
+  status.textContent = result?.attached ? "Full mode connected" : "Full mode disconnected";
 }
 function renderTraffic() {
   const list = byId("trafficList");
@@ -562,12 +610,12 @@ function renderTraffic() {
     };
     list.append(row);
   }
-  if (!visible.length) list.innerHTML = '<div class="empty">Reload the inspected page to capture XHR and Fetch traffic.</div>';
+  if (!visible.length) list.innerHTML = `<div class="empty">${traffic.length ? "No captured requests match this search." : "Reload the target page, then use it to capture Fetch and XHR traffic."}</div>`;
 }
 function renderDetail(record) {
   const detail = byId("detail");
   const statusText = record.originalStatus !== void 0 && record.originalStatus !== record.status ? `Server ${record.originalStatus} \u2192 page sees ${record.status}` : `Status ${record.status || record.error || ""}`;
-  const modeNote = settings.interceptionMode === "full" ? "Full mode modified this request at the Chrome network response stage." : "Page mode modifications are visible to page JavaScript; Chrome Network shows the server exchange.";
+  const modeNote = modeForTab(settings, tabId) === "full" ? "Full mode modified this request at the Chrome network response stage." : "Page mode modifications are visible to page JavaScript; Chrome Network shows the server exchange.";
   detail.innerHTML = `<div class="detail-head"><div><strong>${escapeHtml(record.method)} ${escapeHtml(record.url)}</strong><span>${escapeHtml(statusText)} \xB7 ${record.duration}ms</span></div><div><button id="copyResponse">Copy response</button><button id="createFromRequest" class="primary">Create rule</button></div></div>${record.ruleIds.length ? `<div class="modified-note">${escapeHtml(modeNote)}</div>` : ""}${section("Request", record.requestHeaders, record.requestBody)}${section("Modified response", record.responseHeaders, record.responseBody)}${record.ruleIds.length ? `<p class="applied">Rules applied: ${record.ruleIds.length}</p>` : ""}`;
   byId("createFromRequest").onclick = () => editRule(ruleFromTraffic(record));
   byId("copyResponse").onclick = async (event) => {
@@ -669,9 +717,16 @@ function editRule(rule) {
     }
   };
   byId("deleteRule").onclick = async () => {
+    if (!confirm(`Delete rule "${rule.name}"?`)) return;
     settings.rules = settings.rules.filter((item) => item.id !== rule.id);
     await saveSettings();
     dialog.close();
+  };
+  dialog.onkeydown = (event) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      byId("saveRule").click();
+    }
   };
   byId("cancelRule").onclick = () => dialog.close();
   dialog.showModal();
@@ -725,7 +780,7 @@ function jsonShape(value) {
 async function saveSettings() {
   await chrome.storage.local.set({ settings });
   await chrome.tabs.sendMessage(tabId, { type: "settings-changed" }).catch(() => void 0);
-  if (settings.interceptionMode === "full") await runtimeMessage({ type: "configure-full-mode", tabId, enabled: settings.enabled });
+  if (modeForTab(settings, tabId) === "full") await runtimeMessage({ type: "configure-full-mode", tabId, enabled: settings.enabled });
   render();
 }
 async function changeMode(event) {
@@ -739,10 +794,10 @@ async function changeMode(event) {
   status.hidden = result.ok;
   status.textContent = result.error || "";
   if (!result.ok) {
-    byId("mode").value = settings.interceptionMode || "page";
+    byId("mode").value = modeForTab(settings, tabId);
     return;
   }
-  settings.interceptionMode = mode;
+  settings.tabModes = { ...settings.tabModes || {}, [String(tabId)]: mode };
   await saveSettings();
 }
 function renderProfiles() {
@@ -789,6 +844,9 @@ function showNetworkDialog() {
     byId("downloadKbps").value = String(conditions.downloadKbps);
     byId("uploadKbps").value = String(conditions.uploadKbps);
     byId("offline").checked = conditions.offline;
+    byId("trafficLimit").value = String(settings.trafficLimit || 1e3);
+    byId("trafficFilter").value = settings.trafficFilter || "";
+    byId("preserveTraffic").checked = settings.preserveTraffic !== false;
   };
   fill();
   preset.onchange = () => {
@@ -799,6 +857,9 @@ function showNetworkDialog() {
   byId("cancelNetwork").onclick = () => dialog.close();
   byId("saveNetwork").onclick = async () => {
     settings.networkConditions = { offline: byId("offline").checked, latencyMs: Number(byId("latency").value) || 0, failureRate: (Number(byId("failureRate").value) || 0) / 100, downloadKbps: Number(byId("downloadKbps").value) || 0, uploadKbps: Number(byId("uploadKbps").value) || 0 };
+    settings.trafficLimit = Math.min(1e4, Math.max(100, Number(byId("trafficLimit").value) || 1e3));
+    settings.trafficFilter = byId("trafficFilter").value.trim();
+    settings.preserveTraffic = byId("preserveTraffic").checked;
     await saveSettings();
     dialog.close();
   };

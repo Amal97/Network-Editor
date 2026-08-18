@@ -3,8 +3,8 @@ import { DEFAULT_SETTINGS, PageConfigMessage, PageTrafficMessage, Settings } fro
 async function publishSettings() {
   try {
     if (!chrome.runtime?.id) return;
-    const stored = await chrome.storage.local.get('settings');
-    const settings: Settings = { ...DEFAULT_SETTINGS, ...(stored.settings || {}) };
+    const response = await chrome.runtime.sendMessage({ type: 'get-effective-settings' }) as { settings?: Settings };
+    const settings: Settings = { ...DEFAULT_SETTINGS, ...(response?.settings || {}) };
     const message: PageConfigMessage = { source: 'network-modifier-extension', type: 'config', settings };
     window.postMessage(message, '*');
   } catch {

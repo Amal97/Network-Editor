@@ -1,5 +1,5 @@
 import { applyCorsDefaults, applyHeaders, applyJsonEdits, matchRules, prepareFulfilledHeaders } from './rule-utils';
-import { DEFAULT_SETTINGS, Rule, Settings, TrafficRecord } from './types';
+import { DEFAULT_SETTINGS, modeForTab, Rule, Settings, TrafficRecord } from './types';
 
 const protocolVersion = '1.3';
 const attachedTabs = new Set<number>();
@@ -29,6 +29,10 @@ export interface PendingBreakpoint {
 
 export function onCdpTraffic(handler: (record: TrafficRecord) => void): void {
   trafficHandler = handler;
+}
+
+export function isFullInterceptionAttached(tabId: number): boolean {
+  return attachedTabs.has(tabId);
 }
 
 export async function configureFullInterception(tabId: number, enabled: boolean): Promise<{ ok: boolean; error?: string }> {
@@ -87,7 +91,7 @@ export async function continueBreakpoint(id: string): Promise<void> {
 
 export async function syncFullMode(tabId: number): Promise<{ ok: boolean; error?: string }> {
   const settings = await getSettings();
-  return configureFullInterception(tabId, settings.enabled && settings.interceptionMode === 'full');
+  return configureFullInterception(tabId, settings.enabled && modeForTab(settings, tabId) === 'full');
 }
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
@@ -100,7 +104,10 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 });
 
 chrome.debugger.onDetach.addListener((source) => {
-  if (source.tabId !== undefined) attachedTabs.delete(source.tabId);
+  if (source.tabId !== undefined) {
+    attachedTabs.delete(source.tabId);
+    chrome.runtime.sendMessage({ type: 'attachment-status-changed', tabId: source.tabId, attached: false }).catch(() => undefined);
+  }
 });
 
 async function handlePausedRequest(tabId: number, event: FetchRequestPausedEvent): Promise<void> {

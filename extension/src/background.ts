@@ -1,8 +1,10 @@
-import { DEFAULT_SETTINGS, Settings, TrafficRecord } from './types';
-import { configureFullInterception, continueBreakpoint, getPendingBreakpoints, onCdpTraffic, syncFullMode } from './cdp';
+import { DEFAULT_SETTINGS, modeForTab, Settings, TrafficRecord } from './types';
+import { configureFullInterception, continueBreakpoint, getPendingBreakpoints, isFullInterceptionAttached, onCdpTraffic, syncFullMode } from './cdp';
 
 const trafficByTab = new Map<number, TrafficRecord[]>();
+let currentSettings: Settings = DEFAULT_SETTINGS;
 onCdpTraffic(storeTraffic);
+getSettings().then((settings) => { currentSettings = settings; });
 
 chrome.runtime.onInstalled.addListener(async () => {
   const stored = await chrome.storage.local.get('settings');
@@ -19,6 +21,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ traffic: trafficByTab.get(Number(message.tabId)) || [] });
     return true;
   }
+  if (message?.type === 'get-effective-settings' && sender.tab?.id !== undefined) {
+    getSettings().then((settings) => sendResponse({ settings: { ...settings, interceptionMode: modeForTab(settings, sender.tab!.id!) } }));
+    return true;
+  }
   if (message?.type === 'clear-traffic') {
     trafficByTab.delete(Number(message.tabId));
     sendResponse({ ok: true });
@@ -26,6 +32,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === 'configure-full-mode') {
     configureFullInterception(Number(message.tabId), Boolean(message.enabled)).then(sendResponse);
+    return true;
+  }
+  if (message?.type === 'get-attachment-status') {
+    sendResponse({ attached: isFullInterceptionAttached(Number(message.tabId)) });
     return true;
   }
   if (message?.type === 'get-breakpoints') {
@@ -40,6 +50,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.settings) {
+    currentSettings = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue || {}) };
     chrome.tabs.query({}).then((tabs) => {
       for (const tab of tabs) if (tab.id !== undefined) chrome.tabs.sendMessage(tab.id, { type: 'settings-changed' }).catch(() => undefined);
     });
@@ -52,11 +63,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   configureFullInterception(tabId, false).catch(() => undefined);
 });
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== 'loading') return;
+  if (!currentSettings.preserveTraffic) trafficByTab.delete(tabId);
+});
+
 function storeTraffic(record: TrafficRecord): void {
   if (record.tabId === undefined) return;
   const traffic = trafficByTab.get(record.tabId) || [];
+  const filter = (currentSettings.trafficFilter || '').trim().toLowerCase();
+  if (filter && !`${record.method} ${record.url} ${record.status}`.toLowerCase().includes(filter)) return;
   traffic.push(record);
-  if (traffic.length > 1000) traffic.shift();
+  const limit = Math.max(100, currentSettings.trafficLimit || 1000);
+  if (traffic.length > limit) traffic.splice(0, traffic.length - limit);
   trafficByTab.set(record.tabId, traffic);
   chrome.runtime.sendMessage({ type: 'traffic', record }).catch(() => undefined);
 }

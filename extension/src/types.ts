@@ -38,8 +38,12 @@ export interface Settings {
   enabled: boolean;
   rules: Rule[];
   interceptionMode?: 'page' | 'full';
+  tabModes?: Record<string, 'page' | 'full'>;
   activeProfiles?: string[];
   networkConditions?: NetworkConditions;
+  trafficLimit?: number;
+  trafficFilter?: string;
+  preserveTraffic?: boolean;
 }
 
 export interface TrafficRecord {
@@ -77,6 +81,14 @@ export const DEFAULT_SETTINGS: Settings = {
   enabled: true,
   rules: [],
   interceptionMode: 'page',
+  tabModes: {},
   activeProfiles: ['All'],
-  networkConditions: DEFAULT_NETWORK_CONDITIONS
+  networkConditions: DEFAULT_NETWORK_CONDITIONS,
+  trafficLimit: 1000,
+  trafficFilter: '',
+  preserveTraffic: true
 };
+
+export function modeForTab(settings: Settings, tabId: number): 'page' | 'full' {
+  return settings.tabModes?.[String(tabId)] || settings.interceptionMode || 'page';
+}

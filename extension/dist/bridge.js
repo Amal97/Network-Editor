@@ -10,16 +10,20 @@ var DEFAULT_SETTINGS = {
   enabled: true,
   rules: [],
   interceptionMode: "page",
+  tabModes: {},
   activeProfiles: ["All"],
-  networkConditions: DEFAULT_NETWORK_CONDITIONS
+  networkConditions: DEFAULT_NETWORK_CONDITIONS,
+  trafficLimit: 1e3,
+  trafficFilter: "",
+  preserveTraffic: true
 };
 
 // src/bridge.ts
 async function publishSettings() {
   try {
     if (!chrome.runtime?.id) return;
-    const stored = await chrome.storage.local.get("settings");
-    const settings = { ...DEFAULT_SETTINGS, ...stored.settings || {} };
+    const response = await chrome.runtime.sendMessage({ type: "get-effective-settings" });
+    const settings = { ...DEFAULT_SETTINGS, ...response?.settings || {} };
     const message = { source: "network-modifier-extension", type: "config", settings };
     window.postMessage(message, "*");
   } catch {

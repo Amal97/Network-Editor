@@ -52,6 +52,10 @@ button:hover { background: #eef1f4; }
 .toolbar input { min-width: 130px; max-width: 300px; height: 27px; flex: 1; padding: 4px 7px; border: 1px solid #cbd1d7; border-radius: 4px; }
 .toolbar select { height: 27px; min-height: 27px; flex: none; padding: 2px 4px; border: 1px solid #cbd1d7; border-radius: 4px; background: #fff; font-size: 12px; }
 .toolbar .target-tab { width: min(260px, 28vw); }
+.toolbar .connection-status { margin-left: 2px; padding-left: 12px; position: relative; }
+.connection-status::before { content: ""; position: absolute; top: 50%; left: 2px; width: 7px; height: 7px; border-radius: 50%; background: #89929d; transform: translateY(-50%); }
+.connection-status.connected::before { background: #167852; }
+.connection-status.error::before { background: var(--danger); }
 .toolbar button { min-height: 27px; flex: none; padding: 3px 7px; border-radius: 4px; font-size: 12px; }
 .toolbar .toolbar-icon { display: inline-grid; width: 27px; padding: 0; place-items: center; }
 .toolbar .toolbar-icon svg { width: 15px; height: 15px; pointer-events: none; }
@@ -74,6 +78,25 @@ button:hover { background: #eef1f4; }
 .detail-head strong { overflow-wrap: anywhere; }
 .detail-head span, .applied { color: var(--faint); }
 .modified-note { margin-top: 14px; padding: 9px 11px; border-left: 3px solid var(--accent); background: #e8f1fd; color: #285178; }
+
+@media (max-width: 850px) {
+  .panel { grid-template-columns: 180px minmax(0, 1fr); }
+  .traffic-layout { grid-template-columns: minmax(260px, 42%) minmax(0, 1fr); }
+  .toolbar .target-tab { width: 180px; }
+}
+
+@media (max-width: 650px) {
+  .panel { display: flex; flex-direction: column; overflow: auto; }
+  .panel aside { max-height: 220px; flex: none; }
+  .panel .brand { padding: 10px 12px; }
+  .panel nav { display: none; }
+  .rules-head { margin-top: 0; }
+  .panel main { min-height: 620px; flex: 1; }
+  .toolbar { flex-wrap: wrap; overflow: visible; }
+  .toolbar .target-tab { width: 100%; }
+  .traffic-layout { grid-template-columns: 1fr; grid-template-rows: minmax(220px, 40vh) minmax(320px, auto); }
+  .traffic-list { border-right: 0; border-bottom: 1px solid var(--line); }
+}
 .detail h3 { margin: 18px 0 6px; }
 .detail pre { overflow: auto; max-height: 300px; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: #fff; font: 12px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word; }
 .empty { padding: 28px; color: var(--faint); text-align: center; }

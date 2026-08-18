@@ -1,4 +1,4 @@
-import { DEFAULT_NETWORK_CONDITIONS, DEFAULT_SETTINGS, Rule, Settings, TrafficRecord } from './types';
+import { DEFAULT_NETWORK_CONDITIONS, DEFAULT_SETTINGS, modeForTab, Rule, Settings, TrafficRecord } from './types';
 import { diagnoseRules, exportRules, formatHeaders, formatJsonEdits, importRules, lineDiff, NETWORK_PRESETS, parseHeaderInput, parseJsonEdits, RESPONSE_PRESETS, trafficToHar, urlMatches } from './rule-utils';
 import { Activity, Braces, createIcons, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } from 'lucide';
 
@@ -61,6 +61,12 @@ async function populateTargetTabs(): Promise<void> {
   select.onchange = changeTargetTab;
 }
 
+async function refreshTargetTabs(): Promise<void> {
+  const currentTabId = tabId;
+  await populateTargetTabs();
+  if (currentTabId !== tabId) await changeTargetTab({ target: byId<HTMLSelectElement>('targetTab') } as unknown as Event);
+}
+
 async function changeTargetTab(event: Event): Promise<void> {
   const previousTabId = tabId;
   tabId = Number((event.target as HTMLSelectElement).value);
@@ -76,7 +82,7 @@ async function changeTargetTab(event: Event): Promise<void> {
 }
 
 async function synchronizeInterceptionMode(): Promise<void> {
-  const fullModeEnabled = settings.enabled && settings.interceptionMode === 'full';
+  const fullModeEnabled = settings.enabled && modeForTab(settings, tabId) === 'full';
   const result = await runtimeMessage<{ ok: boolean; error?: string }>({
     type: 'configure-full-mode',
     tabId,
@@ -123,7 +129,26 @@ function wire() {
       renderTraffic();
     }
     if (message?.type === 'breakpoints-changed' && message.tabId === tabId) renderBreakpoints();
+    if (message?.type === 'attachment-status-changed' && message.tabId === tabId) renderConnectionStatus();
   });
+  chrome.tabs.onCreated.addListener(refreshTargetTabs);
+  chrome.tabs.onRemoved.addListener(refreshTargetTabs);
+  chrome.tabs.onUpdated.addListener(refreshTargetTabs);
+  document.addEventListener('keydown', navigateTraffic);
+}
+
+function navigateTraffic(event: KeyboardEvent): void {
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || byId<HTMLDialogElement>('ruleDialog').open) return;
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  const visible = traffic.filter((record) => `${record.method} ${record.url} ${record.status}`.toLowerCase().includes(byId<HTMLInputElement>('search').value.toLowerCase())).reverse();
+  if (!visible.length) return;
+  const current = visible.findIndex((record) => record.id === selectedId);
+  const next = event.key === 'ArrowDown' ? Math.min(visible.length - 1, current + 1) : Math.max(0, current < 0 ? 0 : current - 1);
+  selectedId = visible[next].id;
+  renderTraffic();
+  renderDetail(visible[next]);
+  document.querySelector('.traffic-row.selected')?.scrollIntoView({ block: 'nearest' });
+  event.preventDefault();
 }
 
 function render() {
@@ -132,13 +157,32 @@ function render() {
   pause.title = pauseLabel;
   pause.setAttribute('aria-label', pauseLabel);
   pause.innerHTML = `<i data-lucide="${settings.enabled ? 'pause' : 'play'}"></i>`;
-  byId<HTMLSelectElement>('mode').value = settings.interceptionMode || 'page';
+  byId<HTMLSelectElement>('mode').value = modeForTab(settings, tabId);
   renderModeStatus();
   renderProfiles();
   renderTraffic();
   renderRules();
   renderBreakpoints();
+  renderConnectionStatus();
   createIcons({ icons: { Activity, Braces, Download, FileJson, GitCompareArrows, Pause, Play, Trash2, Upload } });
+}
+
+async function renderConnectionStatus(): Promise<void> {
+  const status = byId('connectionStatus');
+  const mode = modeForTab(settings, tabId);
+  if (!settings.enabled) {
+    status.className = 'connection-status';
+    status.textContent = 'Paused';
+    return;
+  }
+  if (mode === 'page') {
+    status.className = 'connection-status connected';
+    status.textContent = 'Page mode';
+    return;
+  }
+  const result = await runtimeMessage<{ attached?: boolean }>({ type: 'get-attachment-status', tabId });
+  status.className = `connection-status ${result?.attached ? 'connected' : 'error'}`;
+  status.textContent = result?.attached ? 'Full mode connected' : 'Full mode disconnected';
 }
 
 function renderTraffic() {
@@ -161,7 +205,7 @@ function renderTraffic() {
     row.onclick = () => { selectedId = record.id; renderTraffic(); renderDetail(record); };
     list.append(row);
   }
-  if (!visible.length) list.innerHTML = '<div class="empty">Reload the inspected page to capture XHR and Fetch traffic.</div>';
+  if (!visible.length) list.innerHTML = `<div class="empty">${traffic.length ? 'No captured requests match this search.' : 'Reload the target page, then use it to capture Fetch and XHR traffic.'}</div>`;
 }
 
 function renderDetail(record: TrafficRecord) {
@@ -169,7 +213,7 @@ function renderDetail(record: TrafficRecord) {
   const statusText = record.originalStatus !== undefined && record.originalStatus !== record.status
     ? `Server ${record.originalStatus} → page sees ${record.status}`
     : `Status ${record.status || record.error || ''}`;
-  const modeNote = settings.interceptionMode === 'full'
+  const modeNote = modeForTab(settings, tabId) === 'full'
     ? 'Full mode modified this request at the Chrome network response stage.'
     : 'Page mode modifications are visible to page JavaScript; Chrome Network shows the server exchange.';
   detail.innerHTML = `<div class="detail-head"><div><strong>${escapeHtml(record.method)} ${escapeHtml(record.url)}</strong><span>${escapeHtml(statusText)} · ${record.duration}ms</span></div><div><button id="copyResponse">Copy response</button><button id="createFromRequest" class="primary">Create rule</button></div></div>${record.ruleIds.length ? `<div class="modified-note">${escapeHtml(modeNote)}</div>` : ''}${section('Request', record.requestHeaders, record.requestBody)}${section('Modified response', record.responseHeaders, record.responseBody)}${record.ruleIds.length ? `<p class="applied">Rules applied: ${record.ruleIds.length}</p>` : ''}`;
@@ -273,7 +317,18 @@ function editRule(rule: Rule) {
       byId('matchPreview').className = 'match-preview error';
     }
   };
-  byId<HTMLButtonElement>('deleteRule').onclick = async () => { settings.rules = settings.rules.filter((item) => item.id !== rule.id); await saveSettings(); dialog.close(); };
+    byId<HTMLButtonElement>('deleteRule').onclick = async () => {
+      if (!confirm(`Delete rule "${rule.name}"?`)) return;
+      settings.rules = settings.rules.filter((item) => item.id !== rule.id);
+      await saveSettings();
+      dialog.close();
+    };
+    dialog.onkeydown = (event) => {
+      if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        byId<HTMLButtonElement>('saveRule').click();
+      }
+    };
   byId<HTMLButtonElement>('cancelRule').onclick = () => dialog.close();
   dialog.showModal();
 }
@@ -336,7 +391,7 @@ function jsonShape(value: string): 'array []' | 'object {}' | 'string' | 'number
 async function saveSettings() {
   await chrome.storage.local.set({ settings });
   await chrome.tabs.sendMessage(tabId, { type: 'settings-changed' }).catch(() => undefined);
-  if (settings.interceptionMode === 'full') await runtimeMessage({ type: 'configure-full-mode', tabId, enabled: settings.enabled });
+  if (modeForTab(settings, tabId) === 'full') await runtimeMessage({ type: 'configure-full-mode', tabId, enabled: settings.enabled });
   render();
 }
 
@@ -348,10 +403,10 @@ async function changeMode(event: Event) {
   status.hidden = result.ok;
   status.textContent = result.error || '';
   if (!result.ok) {
-    byId<HTMLSelectElement>('mode').value = settings.interceptionMode || 'page';
+    byId<HTMLSelectElement>('mode').value = modeForTab(settings, tabId);
     return;
   }
-  settings.interceptionMode = mode;
+  settings.tabModes = { ...(settings.tabModes || {}), [String(tabId)]: mode };
   await saveSettings();
 }
 
@@ -403,6 +458,9 @@ function showNetworkDialog() {
     byId<HTMLInputElement>('downloadKbps').value = String(conditions.downloadKbps);
     byId<HTMLInputElement>('uploadKbps').value = String(conditions.uploadKbps);
     byId<HTMLInputElement>('offline').checked = conditions.offline;
+    byId<HTMLInputElement>('trafficLimit').value = String(settings.trafficLimit || 1000);
+    byId<HTMLInputElement>('trafficFilter').value = settings.trafficFilter || '';
+    byId<HTMLInputElement>('preserveTraffic').checked = settings.preserveTraffic !== false;
   };
   fill();
   preset.onchange = () => {
@@ -413,6 +471,9 @@ function showNetworkDialog() {
   byId<HTMLButtonElement>('cancelNetwork').onclick = () => dialog.close();
   byId<HTMLButtonElement>('saveNetwork').onclick = async () => {
     settings.networkConditions = { offline: byId<HTMLInputElement>('offline').checked, latencyMs: Number(byId<HTMLInputElement>('latency').value) || 0, failureRate: (Number(byId<HTMLInputElement>('failureRate').value) || 0) / 100, downloadKbps: Number(byId<HTMLInputElement>('downloadKbps').value) || 0, uploadKbps: Number(byId<HTMLInputElement>('uploadKbps').value) || 0 };
+    settings.trafficLimit = Math.min(10000, Math.max(100, Number(byId<HTMLInputElement>('trafficLimit').value) || 1000));
+    settings.trafficFilter = byId<HTMLInputElement>('trafficFilter').value.trim();
+    settings.preserveTraffic = byId<HTMLInputElement>('preserveTraffic').checked;
     await saveSettings(); dialog.close();
   };
   dialog.showModal();

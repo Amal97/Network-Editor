@@ -10,8 +10,12 @@ var DEFAULT_SETTINGS = {
   enabled: true,
   rules: [],
   interceptionMode: "page",
+  tabModes: {},
   activeProfiles: ["All"],
-  networkConditions: DEFAULT_NETWORK_CONDITIONS
+  networkConditions: DEFAULT_NETWORK_CONDITIONS,
+  trafficLimit: 1e3,
+  trafficFilter: "",
+  preserveTraffic: true
 };
 
 // src/rule-utils.ts
