@@ -18,10 +18,7 @@ button { min-height: 30px; padding: 4px 10px; border: 1px solid #cbd1d7; border-
 button:hover { background: #eef1f4; }
 .primary { border-color: var(--accent); background: var(--accent); color: #fff; }
 .danger { color: var(--danger); }
-.logo { position: relative; width: 27px; height: 27px; flex: none; border-radius: 7px; background: #3482e8; }
-.logo::before, .logo::after { content: ""; position: absolute; top: 12px; width: 7px; height: 2px; background: #fff; }
-.logo::before { left: 5px; transform: rotate(45deg); }
-.logo::after { right: 5px; transform: rotate(-45deg); }
+.logo { width: 27px; height: 27px; flex: none; background: url("icons/icon.svg") center / contain no-repeat; }
 .popup { width: 310px; height: auto; padding: 17px; }
 .popup header, .brand { display: flex; align-items: center; gap: 10px; }
 .popup header { padding-bottom: 14px; border-bottom: 1px solid var(--line); }

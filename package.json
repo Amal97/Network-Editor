@@ -10,7 +10,9 @@
   "scripts": {
     "start": "node bin/netmod.js start",
     "trust": "node bin/netmod.js trust",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "release:check": "node scripts/release.mjs --check",
+    "release:package": "node scripts/release.mjs"
   },
   "engines": {
     "node": ">=20.19.0"
@@ -27,6 +29,17 @@
     "devtools"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Amal97/Network-Editor.git"
+  },
+  "homepage": "https://github.com/Amal97/Network-Editor#readme",
+  "bugs": {
+    "url": "https://github.com/Amal97/Network-Editor/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "http-proxy-agent": "^7.0.2",
     "http2-wrapper": "^2.2.1",
@@ -36,9 +49,12 @@
     "ws": "^8.21.3"
   },
   "files": [
+    "assets",
     "bin",
     "src",
     "public",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ]
 }

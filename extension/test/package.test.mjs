@@ -5,11 +5,12 @@ import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const dist = resolve(root, 'dist');
+const sourceManifest = JSON.parse(readFileSync(resolve(root, 'manifest.json'), 'utf8'));
 
 test('build emits a complete loadable extension package', () => {
   const manifest = JSON.parse(readFileSync(resolve(dist, 'manifest.json'), 'utf8'));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.version, '1.0.0');
+  assert.equal(manifest.version, sourceManifest.version);
   assert.equal(manifest.background.type, 'module');
 
   const referencedFiles = [
@@ -19,6 +20,7 @@ test('build emits a complete loadable extension package', () => {
     ...manifest.content_scripts.flatMap((script) => script.js),
     'panel.html',
     'styles.css',
+    'icons/icon.svg',
     ...Object.values(manifest.icons)
   ];
   for (const file of referencedFiles) assert.ok(existsSync(resolve(dist, file)), `Missing dist/${file}`);
@@ -27,6 +29,12 @@ test('build emits a complete loadable extension package', () => {
     const source = readFileSync(resolve(dist, script), 'utf8');
     assert.doesNotMatch(source, /^\s*import\s/m, `${script} contains an unbundled import`);
   }
+});
+
+test('all extension brand icons come from the canonical asset', () => {
+  const canonical = readFileSync(resolve(root, '..', 'assets', 'network-modifier.svg'));
+  assert.deepEqual(readFileSync(resolve(dist, 'icons', 'icon.svg')), canonical);
+  assert.match(readFileSync(resolve(dist, 'styles.css'), 'utf8'), /url\("icons\/icon\.svg"\)/);
 });
 
 test('manifest limits interception to HTTP pages and declares optional full interception support', () => {

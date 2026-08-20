@@ -4,9 +4,9 @@ A cross-platform debugging proxy that lets you **see, intercept and rewrite** th
 traffic of any browser, app or device — like Fiddler or Charles, but small, scriptable and
 driven from a local web UI.
 
-Works on **macOS, Windows and Linux**. Only dependency: Node.js 18+.
+Works on **macOS, Windows and Linux**. Only dependency: Node.js 20.19+.
 
-![architecture](https://img.shields.io/badge/node-%3E%3D18-informational) ![license](https://img.shields.io/badge/license-MIT-informational)
+![architecture](https://img.shields.io/badge/node-%3E%3D20.19-informational) ![license](https://img.shields.io/badge/license-MIT-informational)
 
 ---
 

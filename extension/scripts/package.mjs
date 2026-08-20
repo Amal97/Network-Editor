@@ -5,7 +5,8 @@ import { resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const manifest = JSON.parse(readFileSync(resolve(root, 'manifest.json'), 'utf8'));
-const releases = resolve(root, 'releases');
+const workspaceReleases = resolve(root, '..', 'releases');
+const releases = process.env.NETMOD_RELEASE_DIR || workspaceReleases;
 const destination = resolve(releases, `network-modifier-v${manifest.version}.zip`);
 
 await mkdir(releases, { recursive: true });

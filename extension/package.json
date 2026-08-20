@@ -6,11 +6,13 @@
   "description": "Chrome extension for monitoring and modifying frontend XHR/fetch traffic.",
   "scripts": {
     "icons": "node scripts/generate-icons.mjs",
+    "store-assets": "npm run build && node scripts/generate-store-assets.mjs",
     "build": "npm run icons && node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "test": "node --test test/*.test.mjs",
-    "package": "npm run build && npm run typecheck && npm test && node scripts/package.mjs"
+    "archive": "node scripts/package.mjs",
+    "package": "npm run build && npm run typecheck && npm test && npm run archive"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.31",

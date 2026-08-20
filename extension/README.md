@@ -50,7 +50,9 @@ Use `npm run watch` while developing, then click Reload on the extension card af
 npm run package
 ```
 
-This rebuilds, typechecks, tests, and creates `releases/network-modifier-v1.0.0.zip`. See [PRIVACY.md](PRIVACY.md) for the data-handling policy.
+This rebuilds, typechecks, tests, and creates `../releases/network-modifier-v1.0.0.zip`. See [PRIVACY.md](PRIVACY.md) for the data-handling policy.
+
+For coordinated proxy and extension releases, run `npm run release:package` from the repository root and follow [the release plan](../RELEASE.md).
 
 ## Troubleshooting
 
